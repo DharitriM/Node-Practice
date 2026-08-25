@@ -85,3 +85,387 @@
     A common beginner explanation is:
         "Because setTimeout is asynchronous."
     That's true, but incomplete.
+
+
+4. Step-by-step execution
+    Initially:
+        Call Stack
+        ──────────
+        console.log("A")
+    Output:
+        A
+    Then:
+        setTimeout(...)
+    Node registers the timer.
+    The callback doesn't immediately execute.
+    Then:
+        console.log("C");
+    Output:
+        C
+    Eventually the timer becomes ready and its callback is processed through the event loop.
+    Then:
+        B
+        is printed.
+    Final:
+        A
+        C
+        B
+
+
+5. Important: setTimeout(0) does NOT mean immediately
+    This is a common interview trap.
+        setTimeout(() => {
+            console.log("Hello");
+        }, 0);
+    It does not mean:
+        Execute this exactly after 0 milliseconds.
+    It means approximately:
+        The callback should not run before the timer's minimum delay has elapsed, and it can run when the event loop gets to it.
+    So if the main thread is busy:
+        for (let i = 0; i < 10_000_000_000; i++) {
+            // CPU work
+        }
+        setTimeout(() => {
+            console.log("Hello");
+        }, 0);
+    The timer cannot interrupt that loop.
+    The JavaScript thread must become available first.
+
+
+6. Event Loop
+    The Event Loop is responsible for coordinating asynchronous operations and determining when callbacks can be executed on the JavaScript thread.
+    Think of it as the coordinator between:
+        Call Stack
+        ↓
+        Async operations
+        ↓
+        Queues
+        ↓
+        Call Stack
+    The important idea:
+        JavaScript execution happens on the main thread, while Node uses the event loop and asynchronous mechanisms to allow the application to handle I/O without blocking that thread.
+
+
+7. Node doesn't put every async operation into the worker pool
+    This distinction is very important.
+    For example:
+        fs.readFile(...)
+    may use libuv's worker pool.
+    But network operations are generally handled through the OS's asynchronous networking capabilities rather than simply sending every request to the worker pool.
+    So don't say:
+    "Node sends every asynchronous operation to the thread pool."
+    That's incorrect.
+    A better mental model:
+        Async operation
+            │
+            ├── OS handles it asynchronously
+            │
+            └── Some operations → libuv worker pool
+
+
+8. libuv Worker Pool
+    By default, libuv has a worker pool with 4 threads.
+    Some operations that can use it include:
+        certain filesystem operations
+        DNS operations
+        cryptographic operations
+        compression
+    Example:
+        const fs = require("fs");
+        fs.readFile("file.txt", "utf8", (err, data) => {
+            console.log(data);
+        });
+    JavaScript thread isn't sitting there synchronously waiting for the file read to complete.
+
+
+9. Now the important part — queues
+    Node has different stages and queues involved in asynchronous execution.
+                        Event Loop
+                            │
+                ┌───────────┴───────────┐
+                │                       │
+        Microtasks              Event-loop phases
+                │                       │
+        Promise callbacks            timers
+        queueMicrotask               poll
+                                    check
+                                    etc.
+    There are also Node-specific mechanisms such as:
+        process.nextTick()
+    which has special priority.
+
+
+10. Promise vs Timer
+    Run:
+        console.log("Start");
+        setTimeout(() => {
+            console.log("Timeout");
+        }, 0);
+        Promise.resolve().then(() => {
+            console.log("Promise");
+        });
+        console.log("End");
+    Output:
+        Start
+        End
+        Promise
+        Timeout
+    Why?
+        Synchronous code runs first:
+            Start
+            End
+        Then the Promise continuation is processed as a microtask.
+        Then the timer callback runs.
+        So:
+            Synchronous code
+                ↓
+            Microtasks
+                ↓
+            Timer/event-loop work
+
+
+11. process.nextTick()
+    Node has an especially important mechanism:
+        process.nextTick()
+    Example:
+        console.log("A");
+        process.nextTick(() => {
+            console.log("B");
+        });
+        Promise.resolve().then(() => {
+            console.log("C");
+        });
+        console.log("D");
+    Typically:
+        A
+        D
+        B
+        C
+    For interview purposes, remember:
+        process.nextTick() callbacks are processed with very high priority before the event loop proceeds to other phases.
+    Don't confuse process.nextTick() with:
+        setTimeout() or setImmediate()
+
+
+12. setTimeout() vs setImmediate()
+        setTimeout(() => {
+            console.log("timeout");
+        }, 0);
+        setImmediate(() => {
+            console.log("immediate");
+        });
+    If this is run from the main module, the exact order can be affected by timing.
+    So don't blindly answer:
+    setTimeout always comes first.
+    That's wrong.
+    Inside an I/O callback, however, setImmediate() is generally executed before a setTimeout(..., 0) scheduled there.
+    Example:
+        const fs = require("fs");
+        fs.readFile("file.txt", () => {
+            setTimeout(() => {
+                console.log("timeout");
+            }, 0);
+            setImmediate(() => {
+                console.log("immediate");
+            });
+        });
+    Typically:
+        immediate
+        timeout
+
+
+13. Event Loop phases
+    At a higher level, Node's event loop has phases such as:
+        ┌───────────────────────────┐
+        │          Timers           │
+        ├───────────────────────────┤
+        │     Pending callbacks     │
+        ├───────────────────────────┤
+        │           Idle            │
+        ├───────────────────────────┤
+        │          Poll             │
+        ├───────────────────────────┤
+        │          Check            │
+        ├───────────────────────────┤
+        │      Close callbacks      │
+        └───────────────────────────┘
+    Timers:
+        Handles callbacks for:
+            setTimeout()
+            setInterval()
+    Poll:
+        Handles many I/O-related callbacks.
+        For example:
+            File I/O
+            Network I/O
+    Check:
+        This is where   setImmediate()   callbacks execute.
+    Close callbacks:
+        Handles close events such as:
+            socket.on("close", ...)
+
+
+14. The complete mental model
+    Suppose you have:
+        const fs = require("fs");
+        console.log("1");
+        fs.readFile("data.txt", "utf8", (err, data) => {
+            console.log("2");
+        });
+        Promise.resolve().then(() => {
+            console.log("3");
+        });
+        setTimeout(() => {
+            console.log("4");
+        }, 0);
+        console.log("5");
+    Don't memorize an output blindly.
+    First classify:
+        Synchronous
+            1
+            5
+        Promise microtask
+            3
+        File I/O callback
+            2
+        Timer
+            4
+    The exact ordering between I/O/timer work can depend on circumstances, so the key interview skill is understanding why, not memorizing one output.
+
+
+15. Why Node can handle many requests
+    Suppose:
+        Request A → Database
+        Request B → Database
+        Request C → API
+        Request D → File
+        Request E → Database
+    A traditional blocking model might conceptually do:
+        Thread 1 → Request A → WAIT
+        Thread 2 → Request B → WAIT
+        Thread 3 → Request C → WAIT
+        Thread 4 → Request D → WAIT
+    Node's model is different:
+        Main JS Thread
+            │
+            ├── Request A → DB
+            ├── Request B → DB
+            ├── Request C → API
+            ├── Request D → File
+            └── Request E → DB
+    While I/O is pending, Node can continue processing other work.
+    When the I/O completes, its callback/continuation becomes eligible to execute.
+    That's the fundamental scalability advantage for I/O-bound workloads.
+
+
+16. But what blocks Node?
+    This is extremely important for real-world backend development.
+    Consider:
+        app.get("/test", (req, res) => {
+            let total = 0;
+            for (let i = 0; i < 10_000_000_000; i++) {
+                total += i;
+            }
+            res.json({ total });
+        });
+    This is CPU-heavy synchronous JavaScript.
+    While it's executing:
+        Request A
+        ↓
+        CPU-heavy loop
+        ↓
+        Event Loop blocked
+        ↓
+        Request B waits
+        Request C waits
+        Request D waits
+    This can destroy API responsiveness.
+
+
+17. Real-world example
+    Imagine your restaurant application has:
+        GET /restaurants
+        GET /menu
+        POST /orders
+        GET /dashboard
+    A normal request:
+        POST /orders
+            ↓
+        Validate request
+            ↓
+        Database query
+            ↓
+        Database response
+            ↓
+        Create order
+            ↓
+        Response
+    Node can handle other requests while waiting for the database.
+    But if someone puts this inside the API:
+        while (hugeCalculation) {
+            // CPU-intensive work
+        }
+    the main JavaScript thread gets blocked.
+    This is why production Node applications need to distinguish:
+        I/O-bound
+            vs
+        CPU-bound
+
+
+18. Interview-ready answers
+
+Q: What is the Node.js Event Loop?
+    The Event Loop is the mechanism that allows Node.js to handle asynchronous operations without blocking the main JavaScript thread. 
+    It coordinates callbacks and I/O events and schedules their execution when the JavaScript call stack is available.
+
+Q: Why is Node.js non-blocking?
+    Node uses an event-driven architecture with asynchronous I/O. 
+    Instead of blocking the JavaScript thread while waiting for I/O, 
+    Node delegates the operation to the OS or libuv mechanisms and continues processing other work.
+
+Q: Does Node.js create a thread for every request?
+    No. Node primarily uses a single JavaScript execution thread and 
+    an event-driven architecture rather than creating a dedicated thread for every request.
+
+Q: What is the libuv thread pool?
+    It's a pool of worker threads used by libuv for certain operations that shouldn't execute directly on the main JavaScript thread, 
+    such as some filesystem, DNS, crypto and compression operations.
+
+Q: Does asynchronous mean multithreaded?
+    No. Asynchronous execution and multithreading are different concepts. 
+    Node can perform asynchronous operations without creating a new JavaScript thread for every operation.
+
+Q: What happens if Node's event loop is blocked?
+    Other JavaScript callbacks cannot execute, so requests become delayed 
+    and the application's responsiveness and throughput can degrade significantly.
+
+19. practical quesions
+
+Create event-loop.js:
+    console.log("1");
+    setTimeout(() => {
+        console.log("2");
+    }, 0);
+    Promise.resolve().then(() => {
+        console.log("3");
+    });
+    process.nextTick(() => {
+        console.log("4");
+    });
+    console.log("5");
+
+    answer:
+        1
+        5
+        4
+        3
+        2
+
+The mental model should now be:
+    Synchronous
+        ↓
+    process.nextTick
+        ↓
+    Promise microtasks
+        ↓
+    Event Loop phases
