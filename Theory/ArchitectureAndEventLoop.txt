@@ -1,0 +1,87 @@
+1. Architecture 
+                 Node.js Application
+                        │
+                        ▼
+                 ┌─────────────┐
+                 │     V8      │
+                 │ JS Engine   │
+                 └──────┬──────┘
+                        │
+                 JavaScript Code
+                        │
+                        ▼
+                 ┌─────────────┐
+                 │ Call Stack  │
+                 └──────┬──────┘
+                        │
+                        ▼
+                 ┌─────────────┐
+                 │ Event Loop  │
+                 └──────┬──────┘
+                        │
+              ┌─────────┴─────────┐
+              ▼                   ▼
+       OS asynchronous I/O    libuv Worker Pool
+              │                   │
+              └─────────┬─────────┘
+                        ▼
+                 Callback/
+                 Promise Queue
+                        │
+                        ▼
+                   Call Stack
+
+
+2. Call Stack
+    The Call Stack keeps track of the JavaScript functions currently being executed.
+    function first() {
+        second();
+    }
+
+    function second() {
+        console.log("Hello");
+    }
+
+    first();
+
+    Execution:
+        first()
+        ↓
+        second()
+        ↓
+        console.log()
+    The stack behaves like LIFO.
+    Conceptually:
+                ┌───────────────┐
+                │ console.log() │ ← executing
+                ├───────────────┤
+                │   second()    │
+                ├───────────────┤
+                │   first()     │
+                └───────────────┘
+        When console.log() finishes:
+            console.log()
+        is removed.
+        Then:
+            second()
+        finishes.
+        Then:
+            first()
+        finishes.
+        Stack becomes empty.
+
+
+3. What happens with asynchronous code?
+    Consider:
+        console.log("A");
+        setTimeout(() => {
+            console.log("B");
+        }, 0);
+        console.log("C");
+    Output:
+        A
+        C
+        B
+    A common beginner explanation is:
+        "Because setTimeout is asynchronous."
+    That's true, but incomplete.

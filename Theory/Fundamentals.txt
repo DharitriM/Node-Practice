@@ -1,0 +1,272 @@
+1. What is Node.js?
+    Simple definition:
+        Node.js is a JavaScript runtime environment 
+        that allows JavaScript to execute outside the browser.
+
+    A better answer:
+        Node.js is a JavaScript runtime built on Chrome's V8 JavaScript engine. 
+        It provides a runtime environment outside the browser and 
+        uses an event-driven, non-blocking I/O architecture, 
+        making it well suited for I/O-intensive applications 
+        such as APIs, real-time applications and web servers.
+
+
+2. JavaScript vs. Node.js
+    JavaScript is a programming language.
+    JavaScript does not itself tells:
+        how to access the file
+        how to create an HTTP server
+        how to access the Operaating System
+        how to creat TCP connection
+    But Node.js can do as a runtime environment for JavaScript.
+
+
+3. Browser JavaScript
+    when JavaScript runs inside the Chrome:
+        JavaScript
+            ↓
+        Chrome
+            ↓
+        V8 Engine
+            ↓
+        Browser APIs
+    Browser APIs provide things like:
+        fetch()
+        setTimeout()
+        document
+        windows
+        localStorage
+        WebSocket
+    For Example:
+        document.getElementById("app")
+            this works in the browser because the browser provides the document API.
+
+
+4. Node.js
+    Node provides a different environment:
+        JavaScript
+            ↓
+        Node.js
+            ↓
+        V8 Engine
+            ↓
+        Node APIs + libuv
+            ↓
+        Operating System
+    Therefore Node gives APIs such as:
+        fs
+        HTTP
+        path
+        crypto
+        stream
+        events
+    For example:
+        const fs = require("fs")   // for accessing file system
+        fs.readFile("document.txt", "utf-8", (err, data)=>{
+            console.log(data)
+        });
+    The browser doesn't normally give JavaScript direct access to files but with Node it can be possible.
+
+
+5. What is V8?
+    V8 is Google's JavaScript engine.
+    It was originally developed for Chrome and is written primarrily in c++.
+    Its job is to execute JavaScript.
+    Conceptually:
+        JavaScript Code
+            ↓
+            V8
+            ↓
+        Machine Code
+            ↓
+        CPU
+    V8 handles things such as:
+        parsing JavaScript
+        executeing JavaScript
+        JIT compilation
+        memory management
+        garbage collection
+    Is Node.js a JavaScript engine?
+        No, Node.js is a JavaScript runtime. 
+        It uses Google's V8 JavaScript engine to execute JavaScript and
+        provides additional APIs and capabilities through Node and libuv
+
+
+6. What is Libuv?
+    Node.js needs to handle operations such as:
+        file i/O
+        network i/O
+        timers
+        DNS
+        some OS operations
+    Node uses libuv, a cross-platform C library, to provide its asynchronous I/O infrastructure and event loop.
+    A simplified architecture:
+                      Node.js
+                         │
+                ┌────────┴────────┐
+                │                 │
+            V8               libuv
+                │                 │
+        JavaScript          Event Loop
+        execution          + Worker Pool
+                                │
+                            Operating System 
+    V8 executes JavaScript.
+    libuv provides Node's event loop and asynchronous I/O infrastructure.
+
+
+7. Why is Node.js called single-threaded?
+    The JavaScript execution itself generally happens on single main thread.
+    For example:
+        console.log('A')
+        console.log('B')
+        console.log('C')
+    JavaScript executes these on single thread sequentially
+    But Node can use additional threads internally, particularly through libuv's worker pool.
+    So:
+        JavaScript
+            ↓
+        Main Thread
+            ↓
+        Event Loop
+    while some operations can be handled elsewhere:
+                    Node.js
+                    │
+            ┌────────┴─────────┐
+            │                  │
+        Main Thread        Worker Pool
+            │                  │
+        Event Loop        Background work
+
+
+8. Why is Node.js good for APIs?
+    Suppose we have:
+        1000 users
+            ↓
+        Node.js API
+            ↓
+        Database
+    A request might spend most of its time waiting for:
+        Database
+        Network
+        File System
+        External API
+    Node doesn't need to sit there blocking the javascript thread while waiting.
+    Conceptually:
+        Request
+            ↓
+        Start DB operation
+            ↓
+        Continue handling other work
+            ↓
+        DB completes
+            ↓
+        Callback / Promise continuation
+            ↓
+        Send response
+    This is called non-blocking I/O.
+    That's one of the biggest reasons Node is efficient for I/O-heavy applications.
+
+
+9. Node isn't automatically fast
+    Node can be very efficient for:
+        REST API
+        GraphQL API
+        Real-time applications
+        Chat applications
+        Streaming
+        I/O-heavy services
+        Microservices
+    But:
+        while (true) {
+            // huge CPU computation
+        }
+        that blocks the javascript thread.
+    While that code is running:
+        Request 1 ──┐
+        Request 2 ──┤
+        Request 3 ──┼── BLOCKED
+        Request 4 ──┤
+        Request 5 ──┘
+    That's why CPU-heavy work needs different approach such as:
+        Worker Thread
+        Child Processes
+        separate services
+        queues/Background processing
+
+
+10. practical quesions:
+    create a directory:
+        mkdir node-learning
+        cd node-learning
+    initialize npm:
+        npm init -y
+    create:
+        node-learning/
+        │
+        ├── package.json
+        └── app.js
+    app.js:
+        console.log("Hello")
+    Run:
+        node app.js
+    Output:
+        prints ->  Hello
+    here we don't need <script/> for javascript to be execute as Node is doing its job.
+
+
+11. Interview Questions:
+
+Q1. What is Node.js?
+    Node.js is a JavaScript runtime built on Google's V8 engine 
+    that allows JavaScript to run outside the browser. 
+    It uses an event-driven, non-blocking I/O model 
+    and is well suited for I/O-intensive applications.
+
+Q2. Is Node.js a programming language?
+    No. JavaScript is the programming language; 
+    Node.js is the runtime environment used to execute JavaScript outside the browser.
+
+Q3. Is Node.js a JavaScript engine?
+    No. Node.js uses the V8 JavaScript engine 
+    but provides additional runtime APIs and asynchronous I/O capabilities through Node and libuv.
+
+Q4. What is V8?
+    V8 is Google's JavaScript engine that parses, compiles and executes JavaScript. 
+    Node.js uses V8 to execute JavaScript code.
+
+Q5. What is libuv?
+    libuv is a cross-platform library used by Node.js 
+    for its event loop and asynchronous I/O infrastructure, 
+    including its worker pool.
+
+Q6. Is Node.js single-threaded?
+    JavaScript execution in Node primarily happens on a single main thread, 
+    but Node can use additional threads internally, 
+    such as libuv's worker pool and Worker Threads.
+
+Q7. Why is Node.js good for backend development?
+    Because its event-driven, non-blocking I/O model 
+    allows it to efficiently handle many concurrent I/O operations without creating a separate thread for every request.
+
+Q8. When is Node.js not ideal?
+    For heavily CPU-bound workloads running directly on the main JavaScript thread, 
+    because CPU-intensive operations can block the event loop and delay other requests.
+
+
+                 NODE.JS
+                    │
+        ┌───────────┴───────────┐
+        │                       │
+       V8                     libuv
+        │                       │
+ Executes JS              Event Loop
+        │                       │
+        │                  Async I/O
+        │                       │
+        │                  Worker Pool
+        │                       │
+        └───────────┬───────────┘
+                    │
+              Operating System
+
