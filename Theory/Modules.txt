@@ -96,3 +96,122 @@ Node.js Modules: CommonJS, ES Modules & Module System
     exports an object containing the function.
 
 
+6. exports vs module.exports
+    We see:
+        exports.add = add;
+    This works because initially:
+        exports -> module.exports
+    So:
+        exports.add = add;
+    is efficiently adding a property to:
+        module.exports
+    But this is dangerous:
+        exports = add;
+    It does not change what the module exports.
+    The safer rule:
+        use module.exports when we want to clearly control what the module exports.
+
+
+7. ES Modules
+    Modern Node.js also supports the standard Javascript module system.
+    math.js:
+        export function add(a,b){
+            return a + b;
+        }
+        export function subtract(a,b){
+            return a - b;
+        }
+    then:
+        import {add, subtract} from "./math.js";
+        console.log(add(2,4))   // 6
+
+
+8. Default export
+    We can also:
+        export default function add(a,b){
+            return a + b;
+        }
+    then:
+        import add from "math.js";
+    
+    Notice the syntax difference:
+        Named export:
+            export function add() {}
+            import { add } from "./math.js";
+        Default export:
+            export default function add() {}
+            import add from "./math.js";
+
+
+9. How does Node know you're using ES Modules?
+    There are several ways.
+    One common approach is in package.json:
+        {
+            "type": "module"
+        }
+    Then Node treats .js files as ES modules.
+        Example:
+            project/
+            ├── package.json
+            ├── app.js
+            └── math.js
+        package.json:
+            {
+                "type": "module"
+            }
+    Now:
+        import { add } from "./math.js";
+    works.
+
+
+10. CommonJS vs ES Modules
+    | CommonJS                                  | ES Modules                            |
+    | ----------------------------------------- | ------------------------------------- |
+    | `require()`                               | `import`                              |
+    | `module.exports`                          | `export`                              |
+    | Traditional Node system                   | JavaScript standard module system     |
+    | Often `.cjs`                              | Often `.mjs`                          |
+    | Can use `.js` depending on package config | Can use `.js` with `"type": "module"` |
+    | `require()` is synchronous                | ESM uses static module structure      |
+
+    Don't say:
+        CommonJS is old and ESM is always better.
+        Real projects still use both.
+
+
+11. .cjs and .mjs
+    Node gives explicit extensions:
+    .cjs
+    Means:
+        CommonJS
+        Example:
+            app.cjs
+    Then:
+        const fs = require("fs");
+    
+    .mjs
+    Means:
+        ES Module
+        Example:
+            app.mjs
+    Then:
+        import fs from "fs";
+    These extensions can remove ambiguity.
+
+
+12. Node's built-in modules
+    Node itself provides modules.
+    For example:
+        const fs = require("fs");
+    or:
+        import fs from "node:fs";
+
+    Modern Node code often uses the explicit node: prefix:
+        import fs from "node:fs";
+        import path from "node:path";
+        import http from "node:http";
+    
+    It clearly indicates:
+        This is a Node built-in module.
+
+
