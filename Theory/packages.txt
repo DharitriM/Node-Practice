@@ -1,0 +1,442 @@
+npm, package.json, package-lock.json & node_modules
+
+1. What is npm?
+    npm = Node Package Manager.
+    It is used to:
+        install packages
+        manage dependencies
+        manage project scripts
+        publish packages
+        control package versions
+    For example:
+        npm install express
+            installs Express into your project.
+    Node.js is the runtime. npm is the package manager.
+
+
+2. npm init
+    Create a project:
+        mkdir node-app
+        cd node-app
+        npm init
+    npm asks questions and creates:
+        package.json
+    Usually you'll use:
+        npm init -y
+    The -y accepts the defaults.
+
+
+3. What is package.json?
+    It's the metadata and configuration file for the Node.js project.
+    Example:
+        {
+            "name": "node-app",
+            "version": "1.0.0",
+            "description": "Node learning project",
+            "main": "app.js",
+            "scripts": {
+                "start": "node app.js"
+            },
+            "dependencies": {
+                "express": "^5.1.0"
+            }
+        }
+    Important fields:
+        name
+        version
+        description
+        main
+        scripts
+        dependencies
+        devDependencies
+        type
+
+
+4. dependencies vs devDependencies
+    Production dependency:
+        npm install express
+    goes into:
+        "dependencies": {
+        "express": "..."
+        }
+    The application needs Express to run.
+
+    Development dependency:
+        npm install --save-dev nodemon
+    goes into:
+        "devDependencies": {
+        "nodemon": "..."
+        }
+    You need it during development but not necessarily to run the production application.
+
+    Examples:
+        dependencies
+        ├── express
+        ├── mongoose
+        ├── jsonwebtoken
+
+        devDependencies
+        ├── nodemon
+        ├── eslint
+        ├── prettier
+        └── jest
+    dependencies contain packages required by the application at runtime, while devDependencies contain packages primarily required during development, testing, linting, or building.
+
+
+5. What happens when you run npm install express?
+    Several things happen:
+        npm install express
+    Typically:
+        package.json
+            ↓
+        dependency added
+            ↓
+        node_modules/
+            ↓
+        package-lock.json
+            ↓
+        Express + its dependencies installed
+    Your project becomes:
+        node-app/
+        │
+        ├── node_modules/
+        ├── package-lock.json
+        ├── package.json
+        └── app.js
+
+
+6. What is node_modules?
+    This directory contains the packages installed for the project.
+    For example:
+        node_modules/
+        ├── express/
+        ├── body-parser/
+        ├── cookie/
+        ├── ...
+    Notice something important:
+        You install:
+            npm install express
+        but Express itself depends on other packages.
+        Those dependencies are also installed.
+    That's called the dependency tree.
+
+
+7. Should you commit node_modules?
+    Generally:
+        No.
+    Add it to .gitignore:
+        node_modules/
+        .env
+    Because:
+        it can be huge
+        dependencies can be recreated
+        package.json and lockfile contain the information needed to install them
+    Another developer can run:
+        npm install
+    and recreate node_modules.
+
+
+8. What is package-lock.json?
+    Suppose:
+        "dependencies": {
+        "express": "^5.1.0"
+        }
+    The ^ allows compatible versions according to semver.
+    But you don't want different developers or deployments unexpectedly getting different dependency trees.
+    package-lock.json records the resolved dependency versions and dependency tree used for the installation.
+    So conceptually:
+        package.json
+            ↓
+        What dependencies do I want?
+            
+        package-lock.json
+            ↓
+        Exactly what dependency tree was resolved?
+
+
+9. Why is the lockfile important?
+    Imagine today:
+        Developer A
+        Express 5.1.0
+    A month later, a compatible newer version is available.
+    Without a lockfile, installations could resolve different versions depending on the version ranges and package state.
+    The lockfile helps make installations reproducible.
+    That's particularly important in:
+        CI/CD
+        Docker
+        Production
+        Team development
+
+
+10. npm install vs npm ci
+    npm install:
+        Used commonly during development.
+        It can:
+            install dependencies
+            update package-lock.json when needed
+            resolve dependencies according to package metadata/ranges
+    npm ci:
+        Primarily intended for clean, reproducible installations, especially CI/CD.
+        It uses the lockfile and expects it to be consistent with package.json.
+        It also removes the existing node_modules before installing.
+    Typical CI pipeline:
+        npm ci
+        npm test
+        npm run build
+
+    npm install is generally used for dependency installation and development, while npm ci is designed for clean and reproducible installations in environments such as CI/CD and uses the lockfile strictly.
+
+
+11. Semantic Versioning:
+    "express": "^5.1.0"
+    Version:
+        5.1.0
+        │ │ │
+        │ │ └── PATCH
+        │ └──── MINOR
+        └────── MAJOR
+    MAJOR:
+        Breaking changes.
+            5 → 6
+    MINOR:
+        New backward-compatible functionality.
+            5.1 → 5.2
+    PATCH:
+        Backward-compatible bug fixes.
+            5.1.0 → 5.1.1
+
+
+12. What does ^ mean?
+    Suppose:
+        "express": "^5.1.0"
+    The caret generally allows compatible updates without moving to the next major version.
+    Conceptually:
+        >= 5.1.0
+        < 6.0.0
+    For normal semver packages.
+
+
+13. What does ~ mean?
+    Example:
+        "express": "~5.1.0"
+    This generally allows patch-level updates within the same minor version:
+        >= 5.1.0
+        < 5.2.0
+    So:
+        ^5.1.0    is broader    than ~5.1.0
+
+
+14. Exact version
+    You can specify:
+        "express": "5.1.0"
+    This requests that exact version rather than a range.
+    In real projects, the lockfile is still important even when package.json contains ranges.
+
+
+15. npm scripts
+    Suppose:
+        {
+            "scripts": {
+                "start": "node app.js",
+                "dev": "nodemon app.js"
+            }
+        }
+    Run:
+        npm start
+    or:
+        npm run dev
+
+    You can create useful scripts:
+        {
+            "scripts": {
+                "start": "node src/server.js",
+                "dev": "nodemon src/server.js",
+                "test": "jest",
+                "lint": "eslint ."
+            }
+        }
+    This is how real projects standardize commands.
+
+
+16. npm start vs npm run
+    There are some built-in npm script shortcuts.
+    For example:
+        npm start
+    works for the start script.
+    For custom scripts:
+        npm run dev
+        npm run lint
+        npm run test
+
+
+17. Local vs global packages
+    Suppose you install:
+        npm install nodemon
+    It's installed locally:
+        node_modules/.bin/nodemon
+    You normally use it through an npm script:
+        "dev": "nodemon app.js"
+    You don't generally need a global installation.
+    Modern Node development generally favors project-local dependencies so everyone uses the project's declared version.
+
+
+18. npx
+    You may have heard:
+        npx create-react-app
+    npx is used to execute npm packages/CLI tools without requiring you to manually install them globally.
+    For example:
+        npx eslint .
+    If the project has ESLint installed locally, npx can execute that project's version.
+    This is useful because you avoid depending on whatever global version happens to be installed on your machine.
+
+
+19. npm install vs npm install --save-dev
+    npm install express:
+        → dependencies
+    npm install --save-dev nodemon
+        → devDependencies
+
+    Modern npm also supports:
+        npm i -D nodemon
+    where -D is shorthand for --save-dev.
+
+
+20. Removing a package
+    npm uninstall express
+    npm updates the relevant project metadata and removes the package from the installation.
+
+
+21. Updating packages
+    You can inspect outdated packages:
+        npm outdated
+    Then update according to your project's version constraints:
+        npm update
+    For major upgrades, you should deliberately review compatibility rather than blindly updating everything.
+
+
+22. Security
+    npm dependencies are part of your application's attack surface.
+    You can run:
+        npm audit
+    to check for known vulnerabilities in dependencies.
+    You should understand that:
+        Dependency security is not just about your direct dependencies; vulnerabilities can exist in transitive dependencies too.
+    Example:
+        Your app
+        ↓
+        Express
+        ↓
+        Package A
+        ↓
+        Package B
+        ↓
+        Vulnerable package
+    You didn't explicitly install Package B, but it is still part of your dependency tree.
+
+
+23. Practical project setup
+    Let's create a clean Node project:
+        mkdir node-api
+        cd node-api
+        
+        npm init -y
+
+        npm install express
+        npm install --save-dev nodemon
+
+    Structure:
+        node-api/
+        │
+        ├── node_modules/
+        │
+        ├── src/
+        │   └── server.js
+        │
+        ├── .gitignore
+        ├── package.json
+        └── package-lock.json
+
+    .gitignore:
+        node_modules/
+        .env
+
+    package.json:
+        {
+            "name": "node-api",
+            "version": "1.0.0",
+            "scripts": {
+                "start": "node src/server.js",
+                "dev": "nodemon src/server.js"
+            },
+            "dependencies": {
+                "express": "^5.1.0"
+            },
+            "devDependencies": {
+                "nodemon": "^3.0.0"
+            }
+        }
+
+    Then
+        npm run dev
+
+
+24. Interview questions you should know
+    Q1. What is npm?
+        npm is the package manager commonly used with Node.js to install, manage, and publish JavaScript packages and to run project scripts.
+
+    Q2. What is package.json?
+        It is the project's metadata and configuration file containing information such as dependencies, scripts, version, and module configuration.
+
+    Q3. What is package-lock.json?
+        It records the resolved dependency tree and exact package versions so installations can be reproduced consistently.
+
+    Q4. Why don't we commit node_modules?
+        Because it is large and can be recreated from the project's package metadata and lockfile. We generally commit package.json and the lockfile instead.
+
+    Q5. Difference between dependencies and devDependencies?
+        Dependencies are required at runtime, while devDependencies are primarily used for development, testing, linting, or tooling.
+
+    Q6. What is npm ci?
+        It performs a clean installation based on the lockfile and is commonly used in CI/CD because it provides predictable dependency installation.
+
+    Q7. What is semantic versioning?
+        Semantic versioning uses MAJOR.MINOR.PATCH to communicate breaking changes, backward-compatible features, and backward-compatible fixes.
+
+    Q8. Difference between ^ and ~?
+        ^ generally allows compatible minor and patch updates within the same major version, while ~ generally allows patch updates within the same minor version.
+
+    Q9. What is npx?
+        npx executes npm packages or CLI tools, commonly using a project's local package version without requiring a global installation.
+
+
+25. One practical interview scenario
+    Interviewer:
+        "It works on my machine, but after deploying, a dependency behaves differently. What would you check?"
+    A good answer:
+        "First I'd check the Node.js version and environment, 
+        then compare package.json and package-lock.json. 
+        I'd make sure the deployment uses a clean and reproducible installation such as npm ci, 
+        and then inspect whether a dependency or transitive dependency version differs between environments."
+
+
+Your practical exercise
+    Create a project with:
+        node-learning/
+        ├── src/
+        │   └── app.js
+        ├── package.json
+        ├── package-lock.json
+        └── .gitignore
+
+    Install:
+        npm install express
+        npm install --save-dev nodemon
+
+    Create these scripts:
+        "scripts": {
+            "start": "node src/app.js",
+            "dev": "nodemon src/app.js"
+        }
+
+    Then run:
+        npm run dev
