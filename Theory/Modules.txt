@@ -215,3 +215,199 @@ Node.js Modules: CommonJS, ES Modules & Module System
         This is a Node built-in module.
 
 
+13. Three kinds of modules
+    Node can resolve different types of modules.
+    1. Core modules:
+        Provided by Node:
+            require("fs");
+            require("http");
+            require("path");
+    2. Local modules:
+            require("./utils/helper");
+        The ./ tells Node this is a local path.
+    3. Third-party modules:
+        Installed through npm:
+            const express = require("express");
+                For example:
+                    npm install express
+                Then:
+                    const express = require("express");
+
+
+14. Why ./ matters
+    require("./math") means:
+        Looking for a local module.
+    require("math") means:
+        Resolve a package/module named math.
+    So this distinction is very important.
+
+
+15. Module resolution
+    When Node encounters:
+        require("./math");
+    it needs to determine what file it means.
+    Conceptually it looks for appropriate files such as:
+        math
+        math.js
+        math.json
+        math.node
+    For packages:
+        require("express");
+    Node searches through node_modules and package metadata to resolve the package entry point.
+
+    Node has a module resolution algorithm that determines whether a request refers to a built-in module, local file, or package and then loads the appropriate module.
+
+
+16. Module caching — VERY important
+    Suppose:
+        counter.js
+            let count = 0;
+            count++;
+            module.exports = count;
+        app.js:
+            const counter1 = require("./counter");
+            const counter2 = require("./counter");
+            console.log(counter1);
+            console.log(counter2);
+        You might expect:
+            1
+            2
+        But you'll get:
+            1
+            1
+    Why?:
+        Because CommonJS modules are cached after they are loaded.
+    Conceptually:
+        require("./counter")
+                ↓
+        Load module
+                ↓
+        Execute module
+                ↓
+        Cache result
+                ↓
+        Return exports
+    Second:
+        require("./counter")
+                ↓
+        Already cached
+                ↓
+        Return cached exports
+    The module isn't executed again.
+
+
+17. Why module caching matters in real applications
+    Imagine:
+        // db.js
+        const connection = createDatabaseConnection();
+        module.exports = connection;
+    Multiple files do:
+        require("./db");
+    We generally don't want every import to create another database connection.
+    Module caching can help maintain a shared module instance.
+    This is one reason you'll often see things like:
+        const db = require("./db");
+    used across an application.
+
+
+18. Practical backend example
+    A basic architecture:
+        src/
+        │
+        ├── app.js
+        │
+        ├── controllers/
+        │   └── userController.js
+        │
+        ├── services/
+        │   └── userService.js
+        │
+        └── utils/
+            └── response.js
+
+    userService.js:
+        async function getUser(id) {
+            // database logic
+            return {
+                id,
+                name: "Dharitri"
+            };
+        }
+
+        module.exports = {
+            getUser
+        };
+
+    userController.js:
+        const userService = require("../services/userService");
+
+        async function getUser(req, res) {
+            const user = await userService.getUser(req.params.id);
+
+            res.json(user);
+        }
+
+        module.exports = {
+            getUser
+        };
+
+    Notice the dependency flow:
+        Controller
+            ↓
+        Service
+            ↓
+        Database
+
+    This is a much better design than putting everything inside the route handler.
+
+
+19. Circular dependencies
+    Suppose:
+        A → B
+        B → A
+    For example:
+        // a.js
+        const b = require("./b");
+    and:
+        // b.js
+        const a = require("./a");
+    Now we have a circular dependency.
+    Node can partially initialize modules in this situation, which can lead to unexpected undefined values or partially initialized exports.
+    Example architecture:
+        controller
+        ↓
+        service
+        ↓
+        repository
+        ↓
+        service
+    That kind of circular dependency is usually a design smell.
+    Better to restructure your dependencies.
+
+
+20. Interview questions
+    Q1. What is a module in Node.js?
+        A module is a reusable and encapsulated unit of code that can expose functionality to other modules through an export mechanism.
+
+    Q2. What are CommonJS and ES Modules?
+        They are two module systems supported by Node.js. CommonJS uses require and module.exports, while ES Modules use import and export.
+
+    Q3. What is module.exports?
+        module.exports defines the value that a CommonJS module exposes when another module imports it using require().
+
+    Q4. Difference between exports and module.exports?
+        Initially exports references module.exports, so adding properties through exports works. But reassigning exports breaks that reference. module.exports is the actual value returned by require().
+
+    Q5. Are Node modules cached?
+        Yes. CommonJS modules are cached after their first load, so subsequent require() calls generally return the cached exports rather than executing the module again.
+
+    Q6. Why is module caching useful?
+        It avoids repeatedly executing the same module and can allow shared module-level state, such as a database connection or configuration object.
+
+    Q7. What is the difference between .cjs and .mjs?
+        .cjs explicitly indicates CommonJS, while .mjs explicitly indicates an ES Module.
+
+    Q8. Can Node.js use ES Modules?
+        Yes. Node.js supports ES Modules using mechanisms such as "type": "module" in package.json or the .mjs extension.
+
+
