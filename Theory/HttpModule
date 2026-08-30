@@ -1,0 +1,618 @@
+Node.js HTTP Module
+
+1. What is the HTTP module?
+    Node provides a built-in module called http.
+    We don't install it:
+        const http = require("node:http");
+    It allows you to create an HTTP server directly.
+    The basic flow is:
+        Client
+        │
+        │ HTTP Request
+        ▼
+        Node.js HTTP Server
+        │
+        ├── Method
+        ├── URL
+        ├── Headers
+        └── Body
+        │
+        ▼
+        Your Logic
+        │
+        ▼
+        HTTP Response
+        │
+        ├── Status Code
+        ├── Headers
+        └── Body
+        ▼
+        Client
+
+
+2. Create your first HTTP server
+    Create:
+        src/server.js
+            const http = require("node:http");
+
+            const server = http.createServer((req, res) => {
+                res.end("Hello from Node.js");
+            });
+
+            server.listen(3000, () => {
+                console.log("Server running on port 3000");
+            });
+    Run:
+        node src/server.js
+    Open:
+        http://localhost:3000
+    You'll get:
+        Hello from Node.js
+
+
+3. What is actually happening?
+    This line:
+        http.createServer()
+    creates an HTTP server.
+
+    This callback:
+        (req, res) => {
+            ...
+        }
+    is called whenever a request reaches the server.
+
+    You can think of it as:
+        Browser
+        ↓
+        GET /users
+        ↓
+        Node HTTP Server
+        ↓
+        (req, res) => {}
+
+    The two important objects are:
+        req
+        res
+
+
+4. req — Request object
+    req contains information about the incoming HTTP request.
+    For example:
+        const server = http.createServer((req, res) => {
+            console.log(req.method);
+            console.log(req.url);
+        });
+    If you visit:
+        http://localhost:3000/users
+    you'll get:
+        GET
+        /users
+
+
+5. HTTP methods
+    The most common methods are:
+        GET
+        POST
+        PUT
+        PATCH
+        DELETE
+    You can inspect the method:
+        console.log(req.method);
+    Example:
+        GET
+        For a POST request:    POST
+
+
+6. req.url
+    console.log(req.url);
+    If the request is:
+        GET /users
+    you get:
+        /users
+    If:
+        GET /users?page=2
+    you get:
+        /users?page=2
+    This is where URL parsing becomes important.
+
+
+7. Routing manually
+    Without Express, you have to implement routing yourself.
+        const server = http.createServer((req, res) => {
+
+            if (req.method === "GET" && req.url === "/") {
+                res.end("Home");
+            }
+
+            else if (req.method === "GET" && req.url === "/users") {
+                res.end("Users");
+            }
+
+            else if (req.method === "GET" && req.url === "/products") {
+                res.end("Products");
+            }
+
+            else {
+                res.statusCode = 404;
+                res.end("Not Found");
+            }
+        });
+    Now:
+        GET /   →    Home
+
+    And:
+        GET /users    →    Users
+
+    This is essentially primitive routing.
+    Express later gives us a much cleaner API:
+        app.get("/users", handler);
+
+
+8. HTTP status codes
+    Don't just return:
+        res.end("Not Found");
+    Use an appropriate status code:
+        res.statusCode = 404;
+        res.end("Not Found");
+    
+    Common codes:
+    | Status | Meaning               |
+    | ------ | --------------------- |
+    | 200    | OK                    |
+    | 201    | Created               |
+    | 204    | No Content            |
+    | 400    | Bad Request           |
+    | 401    | Unauthorized          |
+    | 403    | Forbidden             |
+    | 404    | Not Found             |
+    | 409    | Conflict              |
+    | 422    | Unprocessable Content |
+    | 500    | Internal Server Error |
+
+    For example:
+        if (req.url === "/users") {
+            res.statusCode = 200;
+            res.end("Users");
+        }
+
+
+9. Response headers
+    You can set headers:
+        res.setHeader("Content-Type", "text/plain");
+    Then:
+        res.end("Hello");
+    For JSON:
+        res.setHeader("Content-Type", "application/json");
+    Then:
+        res.end(JSON.stringify({
+            message: "Hello",
+            success: true
+        }));
+    The client receives JSON rather than plain text.
+
+
+10. Build a JSON API
+    Let's make a simple API:
+        const http = require("node:http");
+        const server = http.createServer((req, res) => {
+
+            res.setHeader("Content-Type", "application/json");
+
+            if (req.method === "GET" && req.url === "/users") {
+
+                res.statusCode = 200;
+
+                res.end(JSON.stringify([
+                    {
+                        id: 1,
+                        name: "John"
+                    },
+                    {
+                        id: 2,
+                        name: "Sarah"
+                    }
+                ]));
+
+                return;
+            }
+
+            res.statusCode = 404;
+
+            res.end(JSON.stringify({
+                message: "Route not found"
+            }));
+        });
+
+        server.listen(3000, () => {
+            console.log("Server running on port 3000");
+        });
+
+    Now:
+        GET /users
+    returns:
+        [
+            {
+                "id": 1,
+                "name": "John"
+            },
+            {
+                "id": 2,
+                "name": "Sarah"
+            }
+        ]
+
+
+11. Why return matters here
+    Notice:
+        res.end(...);
+        return;
+    Why?:
+        Because after sending the response, you don't want the remaining routing logic to execute.
+    For example:
+        if (req.url === "/users") {
+            res.end("Users");
+        }
+
+        res.statusCode = 404;
+        res.end("Not Found");
+
+    You could accidentally try to send multiple responses.
+    That leads to errors such as:
+        Error [ERR_HTTP_HEADERS_SENT]
+    So when manually routing, it's common to finish the request handler after responding.
+
+
+12. Query parameters
+    Suppose:
+        /users?page=2&limit=10
+    Instead of manually splitting strings, use Node's URL API.
+        const { URL } = require("node:url");
+
+        const server = http.createServer((req, res) => {
+
+            const url = new URL(req.url, `http://${req.headers.host}`);
+
+            console.log(url.pathname);
+            console.log(url.searchParams.get("page"));
+            console.log(url.searchParams.get("limit"));
+
+            res.end("OK");
+        });
+
+    For:
+        /users?page=2&limit=10
+
+    you get:
+        /users
+        2
+        10
+
+    This is the proper conceptual separation:
+        URL
+        │
+        ├── pathname
+        │
+        └── search parameters
+
+
+13. Route parameters
+    Now suppose:
+        /users/123
+    You want:
+        userId = 123
+    Without Express, you have to parse the path yourself.
+    Conceptually:
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const parts = url.pathname.split("/");
+        console.log(parts);
+    For:
+        /users/123
+    you get approximately:
+        ["", "users", "123"]
+    Then:
+        const userId = parts[2];
+
+    This works, but becomes ugly very quickly.
+    That's one reason frameworks such as Express are useful.
+
+
+14. Request body — VERY important
+    For:
+        GET
+    you usually don't have a meaningful request body.
+    But for:
+        POST
+        PUT
+        PATCH
+    you commonly receive data in the body.
+    Example request:
+        {
+            "name": "John",
+            "email": "john@example.com"
+        }
+    Here's the important part:
+        The request body arrives as a stream.
+
+
+15. Reading a POST body
+    Example:
+        const server = http.createServer((req, res) => {
+
+            if (req.method === "POST" && req.url === "/users") {
+
+                let body = "";
+
+                req.on("data", (chunk) => {
+                    body += chunk;
+                });
+
+                req.on("end", () => {
+
+                    const data = JSON.parse(body);
+
+                    console.log(data);
+
+                    res.statusCode = 201;
+                    res.end("User created");
+                });
+
+                return;
+            }
+
+            res.statusCode = 404;
+            res.end("Not Found");
+        });
+
+
+16. Why is req a stream?
+    Because Node doesn't necessarily receive the entire request body at once.
+    Imagine uploading:
+        100 MB file
+    You don't want Node to blindly load all 100 MB into memory before processing anything.
+    Instead:
+        Request
+        ↓
+        Chunk 1
+        Chunk 2
+        Chunk 3
+        Chunk 4
+        ...
+        Chunk N
+    The request is readable as a stream.
+    That's why:
+        req.on("data", ...)
+    and:
+        req.on("end", ...)
+    exist.
+
+
+17. res.end() is important
+    You must eventually finish the response.
+        res.end("Hello");
+    This:
+        writes the response body
+        signals that the response is complete
+    You can also do:
+        res.write("Hello ");
+        res.write("World");
+        res.end();
+    Response:
+        Hello World
+    This demonstrates that HTTP responses can also be streamed.
+
+
+18. res.write() vs res.end()
+    res.write():
+        Writes a chunk:
+            res.write("Hello");
+            The response isn't finished yet.
+    res.end():
+        Finishes the response:
+        res.end("Done");
+
+    or:
+        res.write("Hello");
+        res.end();
+    Think:
+        write()
+        write()
+        write()
+        ↓
+        end()
+
+
+19. Server lifecycle
+    When you do:
+        server.listen(3000);
+    Node starts listening for incoming connections.
+    You can also handle server events:
+        server.on("listening", () => {
+            console.log("Server started");
+        });
+
+        server.on("error", (error) => {
+            console.error(error);
+        });
+
+    And gracefully stop:
+        server.close(() => {
+            console.log("Server closed");
+        });
+
+    Graceful shutdown becomes very important in production.
+
+
+20. Practical API
+    const http = require("node:http");
+    const { URL } = require("node:url");
+
+    const users = [
+        { id: 1, name: "John" },
+        { id: 2, name: "Sarah" }
+    ];
+
+    const server = http.createServer((req, res) => {
+
+        const url = new URL(
+            req.url,
+            `http://${req.headers.host}`
+        );
+
+        res.setHeader("Content-Type", "application/json");
+
+        // GET /users
+        if (req.method === "GET" && url.pathname === "/users") {
+            res.statusCode = 200;
+            res.end(JSON.stringify(users));
+            return;
+        }
+
+        // GET /users/:id
+        if (
+            req.method === "GET" &&
+            url.pathname.startsWith("/users/")
+        ) {
+            const id = Number(url.pathname.split("/")[2]);
+
+            const user = users.find(user => user.id === id);
+
+            if (!user) {
+                res.statusCode = 404;
+
+                res.end(JSON.stringify({
+                    message: "User not found"
+                }));
+
+                return;
+            }
+
+            res.statusCode = 200;
+            res.end(JSON.stringify(user));
+            return;
+        }
+
+        res.statusCode = 404;
+
+        res.end(JSON.stringify({
+            message: "Route not found"
+        }));
+    });
+
+    server.listen(3000, () => {
+        console.log("Server running on port 3000");
+    });
+
+
+21. Why do we need Express then?
+    Even for two routes, we're manually handling:
+        URL parsing
+        Routing
+        Methods
+        Status codes
+        Headers
+        Request body
+        Responses
+        Errors
+    Imagine 50 routes.
+        code becomes:
+            if
+            else if
+            else if
+            else if
+            else if
+            ...
+    Express gives you:
+        app.get("/users", getUsers);
+        app.get("/users/:id", getUser);
+        app.post("/users", createUser);
+        app.put("/users/:id", updateUser);
+        app.delete("/users/:id", deleteUser);
+    Much cleaner.
+
+
+22. Is Express a replacement for Node.js?
+    No.
+    Express is a web framework that runs on Node.js.
+    Conceptually:
+        JavaScript
+            ↓
+        Node.js
+            ↓
+        HTTP capabilities
+            ↓
+        Express
+            ↓
+        Your API
+    Express uses Node's HTTP infrastructure underneath.
+
+
+23. Build this without Express:
+    GET    /users
+    GET    /users/:id
+    POST   /users
+    DELETE /users/:id
+
+    Use an in-memory array:
+        const users = [];
+    For POST:
+        {
+            "name": "Dharitri",
+            "email": "dharitri@example.com"
+        }
+
+    Return:
+        201 Created
+    For a missing user:
+        404 Not Found
+
+
+24. Interview questions
+    Q1. How do you create an HTTP server in Node.js?
+        Using the built-in http module and http.createServer().
+
+    Q2. What are req and res?
+        req represents the incoming HTTP request and contains information such as the method, URL, headers and body. res is used to construct and send the HTTP response.
+
+    Q3. How do you set a response status code?
+        res.statusCode = 404;
+
+    Q4. How do you send JSON using the HTTP module?
+        res.setHeader("Content-Type", "application/json");
+
+        res.end(JSON.stringify({
+            message: "Success"
+        }));
+
+    Q5. What is res.end()?
+        It signals that the HTTP response is complete and optionally sends the final response data.
+
+    Q6. How does Node receive a POST request body?
+        The incoming request is a readable stream, so the body can arrive in chunks. We can listen for data events and process the complete body on the end event.
+
+    Q7. Why does Node expose the request body as a stream?
+        It allows Node to process potentially large data incrementally instead of requiring the entire body to be loaded into memory at once.
+
+    Q8. Why use Express if Node already has the HTTP module?
+        Node's HTTP module provides low-level HTTP functionality, but Express provides higher-level abstractions such as routing, middleware, request parsing and response helpers, making API development significantly easier to structure and maintain.
+
+
+
+                HTTP Request
+                     │
+                     ▼
+              Node HTTP Server
+                     │
+             ┌───────┴───────┐
+             │               │
+          req object      res object
+             │               │
+       method/url/body    status/headers
+             │               │
+             ▼               ▼
+             Your Application Logic
+                     │
+                     ▼
+                res.end()
+                     │
+                     ▼
+                HTTP Response
