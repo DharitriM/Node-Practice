@@ -1,0 +1,40 @@
+1. What is Express?
+    Express is a lightweight web framework built on top of Node.js.
+    Node gives us low-level HTTP capabilities:
+        http.createServer()
+    Express gives us higher-level abstractions:
+        app.get()
+        app.post()
+        app.use()
+        app.listen()
+    Conceptually:
+        Node.js
+        │
+        └── HTTP module
+                │
+                ▼
+            Express
+                │
+                ▼
+            Your REST API
+    Express.js is a lightweight web framework for Node.js that provides abstractions for routing, middleware, request handling, and responses, making it easier to build HTTP APIs and web applications.
+
+
+2. Installing Express
+    Inside your project:
+        npm install express
+    Create:
+        src/
+        └── server.js
+    Then:
+        const express = require("express");
+        const app = express();
+        app.listen(3000, () => {
+            console.log("Server running on port 3000");
+        });
+    Run:
+        node src/server.js
+    Your server is now listening on:
+        http://localhost:3000
+
+
