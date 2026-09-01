@@ -38,3 +38,566 @@
         http://localhost:3000
 
 
+3. Your first Express route
+        const express = require("express");
+        const app = express();
+        app.get("/", (req, res) => {
+            res.send("Hello from Express");
+        });
+        app.listen(3000);
+    Now:
+        GET /
+    returns:
+        Hello from Express
+    Compare this with raw Node:
+        if (req.method === "GET" && req.url === "/") {
+            res.end("Hello");
+        }
+    Express simplifies it to:
+        app.get("/", handler);
+
+
+4. HTTP methods
+    Express provides methods corresponding to HTTP methods:
+        app.get();
+        app.post();
+        app.put();
+        app.patch();
+        app.delete();
+    Example:
+        app.get("/users", (req, res) => {
+            res.send("Get users");
+        });
+
+        app.post("/users", (req, res) => {
+            res.send("Create user");
+        });
+
+        app.put("/users/:id", (req, res) => {
+            res.send("Update user");
+        });
+
+        app.delete("/users/:id", (req, res) => {
+            res.send("Delete user");
+        });
+    This is much cleaner than manually inspecting:
+        req.method
+        req.url
+
+
+5. Route parameters
+    Suppose:
+        GET /users/123
+    You define:
+        app.get("/users/:id", (req, res) => {
+            console.log(req.params.id);
+
+            res.send(`User ID: ${req.params.id}`);
+        });
+    Output:
+        User ID: 123
+    The :id is a route parameter.
+    Multiple parameters:
+        app.get("/users/:userId/orders/:orderId", (req, res) => {
+            console.log(req.params.userId);
+            console.log(req.params.orderId);
+        });
+    Request:
+        /users/10/orders/500
+    gives:
+        userId = 10
+        orderId = 500
+
+
+6. Query parameters
+    Request:
+        GET /users?page=2&limit=10
+    Access them using:
+        app.get("/users", (req, res) => {
+            console.log(req.query.page);
+            console.log(req.query.limit);
+
+            res.send("OK");
+        });
+    Output:
+        2
+        10
+    Important distinction:
+        /users/123
+        ↑
+        req.params
+    versus:
+        /users?page=2
+            ↑
+        req.query
+    Interview question
+    Q: Difference between req.params and req.query?
+        req.params contains dynamic values defined in the route path, while req.query contains query-string parameters appended to the URL.
+
+
+7. Request body
+    Suppose client sends:
+        {
+            "name": "John",
+            "email": "john@example.com"
+        }
+    You need:
+        app.use(express.json());
+    Then:
+        app.post("/users", (req, res) => {
+            console.log(req.body);
+
+            res.json({
+                message: "User received",
+                user: req.body
+            });
+        });
+    Now:
+        req.body
+    contains:
+        {
+            name: "John",
+            email: "john@example.com"
+        }
+
+
+8. What does express.json() actually do?
+    When the client sends JSON:
+        HTTP Request
+            │
+            ▼
+        JSON body
+            │
+            ▼
+        express.json()
+            │
+            ▼
+        req.body
+    It is middleware that parses incoming JSON request bodies and makes the parsed data available through:
+        req.body
+    Without it, depending on the request and Express setup, req.body may be undefined.
+
+
+9. Middleware — the heart of Express
+    Middleware is a function that has access to:
+        req
+        res
+        next
+    Example:
+        app.use((req, res, next) => {
+            console.log("Request received");
+
+            next();
+        });
+    The important function is:
+        next();
+    It tells Express:
+        "I'm done with my middleware processing. Continue to the next matching middleware or route."
+
+
+0. Middleware request flow
+    Suppose:
+        app.use((req, res, next) => {
+            console.log("Middleware 1");
+            next();
+        });
+
+        app.use((req, res, next) => {
+            console.log("Middleware 2");
+            next();
+        });
+
+        app.get("/", (req, res) => {
+            console.log("Controller");
+            res.send("Hello");
+        });
+    Request:
+        GET /
+    Output:
+        Middleware 1
+        Middleware 2
+        Controller
+    The flow is:
+        Request
+        ↓
+        Middleware 1
+        ↓ next()
+        Middleware 2
+        ↓ next()
+        Route handler
+        ↓
+        Response
+
+
+11. What happens if you don't call next()?
+    Consider:
+        app.use((req, res, next) => {
+            console.log("Middleware");
+        });
+    There's no:
+        next();
+    and no response:
+        res.send()
+    The request can remain hanging.
+    Conceptually:
+        Request
+        ↓
+        Middleware
+        ↓
+        ❌
+    Nothing tells Express to continue.
+    This is one of the most common middleware mistakes.
+
+
+12. Middleware can terminate a request
+    next() isn't always required.
+    For authentication:
+        app.use((req, res, next) => {
+
+            const token = req.headers.authorization;
+
+            if (!token) {
+                return res.status(401).json({
+                    message: "Unauthorized"
+                });
+            }
+
+            next();
+        });
+    If there's no token:
+        Request
+        ↓
+        Auth middleware
+        ↓
+        401 Response
+    The request doesn't continue.
+    If authentication succeeds:
+        Request
+        ↓
+        Auth middleware
+        ↓ next()
+        Controller
+
+
+13. Real-world middleware
+    Typical backend middleware:
+        Request
+        │
+        ▼
+        CORS
+        │
+        ▼
+        JSON parser
+        │
+        ▼
+        Logger
+        │
+        ▼
+        Authentication
+        │
+        ▼
+        Validation
+        │
+        ▼
+        Controller
+        │
+        ▼
+        Response
+    This is why Express middleware is so powerful.
+
+
+14. Application-level middleware
+    Example:
+        app.use((req, res, next) => {
+            console.log(`${req.method} ${req.url}`);
+            next();
+        });
+    This runs for matching requests across the application.
+    You can also restrict it:
+        app.use("/admin", (req, res, next) => {
+            console.log("Admin request");
+            next();
+        });
+    This middleware applies to /admin routes.
+
+
+15. Router-level middleware
+    As your application grows, you don't want everything in app.js.
+    Create:
+        routes/
+        └── userRoutes.js
+
+        const express = require("express");
+
+        const router = express.Router();
+
+        router.get("/", (req, res) => {
+            res.json({
+                message: "Get users"
+            });
+        });
+
+        router.post("/", (req, res) => {
+            res.json({
+                message: "Create user"
+            });
+        });
+
+        module.exports = router;
+    Then:
+        const userRoutes = require("./routes/userRoutes");
+        app.use("/users", userRoutes);
+    Now:
+        GET  /users
+        POST /users
+    are handled by userRoutes.
+
+
+16. Why routers are important
+    A production backend might have:
+        routes/
+        ├── userRoutes.js
+        ├── authRoutes.js
+        ├── orderRoutes.js
+        ├── productRoutes.js
+        └── paymentRoutes.js
+    Then:
+        app.use("/users", userRoutes);
+        app.use("/auth", authRoutes);
+        app.use("/orders", orderRoutes);
+        app.use("/products", productRoutes);
+        app.use("/payments", paymentRoutes);
+    This gives you modular routing.
+
+
+17. Controller vs Service
+    This is where you should start thinking like a backend developer.
+    Don't do this:
+        app.post("/users", async (req, res) => {
+
+            // validation
+
+            // database query
+
+            // password hashing
+
+            // email
+
+            // business logic
+
+            // response
+        });
+    Instead:
+        Route
+        ↓
+        Controller
+        ↓
+        Service
+        ↓
+        Repository / Database
+    Example:
+        Route:
+            router.post("/", createUser);
+        Controller:
+            async function createUser(req, res) {
+                const user = await userService.createUser(req.body);
+                res.status(201).json(user);
+            }
+        Service:
+            async function createUser(data) {
+                // business logic
+                // database interaction
+            }
+    This separation becomes extremely important in interviews.
+
+
+18. Express error handling
+    Suppose:
+        app.get("/users", async (req, res) => {
+
+            throw new Error("Database failed");
+
+        });
+    You need centralized error handling.
+    Express error middleware has four arguments:
+        app.use((err, req, res, next) => {
+            console.error(err);
+
+            res.status(500).json({
+                message: "Internal Server Error"
+            });
+        });
+    The four arguments are critical:
+        (err, req, res, next)
+    Express recognizes this as error-handling middleware based on the four-argument signature.
+
+
+19. Why centralized error handling?
+    Without centralized handling, you might have:
+        try {
+            ...
+        } catch (error) {
+            res.status(500).json(...);
+        }
+    in every controller.
+    Instead:
+        Controller
+            ↓
+        Error
+            ↓
+        next(error)
+            ↓
+        Central error middleware
+            ↓
+        Response
+    Example:
+        app.get("/users", async (req, res, next) => {
+            try {
+                const users = await getUsers();
+
+                res.json(users);
+            } catch (error) {
+                next(error);
+            }
+        });
+    Then:
+        app.use((err, req, res, next) => {
+            res.status(500).json({
+                message: err.message
+            });
+        });
+
+
+20. Middleware order matters
+    Consider:
+        app.use(authMiddleware);
+        app.get("/users", getUsers);
+    Authentication runs before /users.
+    But:
+        app.get("/users", getUsers);
+        app.use(authMiddleware);
+    The auth middleware won't protect that route because the request already matched the route and generated a response.
+    Similarly, your error middleware should generally be registered after your routes.
+    Conceptually:
+        app
+        │
+        ├── body parser
+        ├── logger
+        ├── authentication
+        ├── routes
+        └── error handler
+    Order is significant.
+
+
+21. Build a realistic Express application
+    Structure:
+        src/
+        │
+        ├── server.js
+        ├── app.js
+        │
+        ├── routes/
+        │   └── userRoutes.js
+        │
+        ├── controllers/
+        │   └── userController.js
+        │
+        ├── services/
+        │   └── userService.js
+        │
+        └── middleware/
+            └── errorMiddleware.js
+    app.js:
+        const express = require("express");
+
+        const userRoutes = require("./routes/userRoutes");
+        const errorMiddleware = require("./middleware/errorMiddleware");
+
+        const app = express();
+
+        app.use(express.json());
+
+        app.use("/users", userRoutes);
+
+        app.use(errorMiddleware);
+
+        module.exports = app;
+    server.js:
+        const app = require("./app");
+
+        app.listen(3000, () => {
+            console.log("Server running on port 3000");
+        });
+    Notice:
+        app.js:    configures the application.
+        server.js:    starts the HTTP server.
+    That's a clean separation.
+
+
+22. Interview questions
+    Q1. What is Express?
+        Express is a lightweight Node.js web framework that provides routing, middleware, request handling, and response abstractions for building web applications and APIs.
+
+    Q2. What is middleware?
+        Middleware is a function that executes during the request-response lifecycle and has access to req, res, and next. It can modify the request or response, terminate the request, or pass control to the next middleware.
+
+    Q3. What does next() do?
+        next() passes control to the next matching middleware or route handler.
+
+    Q4. What happens if middleware doesn't call next() or send a response?
+        The request can remain pending because Express has no instruction to continue processing or complete the response.
+
+    Q5. Difference between req.params, req.query, and req.body?
+        req.params contains route parameters, req.query contains URL query parameters, and req.body contains parsed request body data.
+
+    Q6. What is express.json()?
+        It's built-in Express middleware that parses incoming JSON request bodies and makes the resulting object available through req.body.
+
+    Q7. What is error-handling middleware?
+        Middleware with the signature (err, req, res, next) that handles errors centrally in the Express request pipeline.
+
+    Q8. Why does middleware order matter?
+        Express processes middleware in registration order, so authentication, parsing, routes, and error handling need to be registered in the appropriate sequence.
+
+    Q9. Node HTTP module vs Express?
+        Node's HTTP module provides low-level HTTP functionality, while Express builds higher-level abstractions such as routing and middleware on top of Node.
+
+
+23. Practical exercise
+    Build this:
+        GET    /users
+        GET    /users/:id
+        POST   /users
+        PATCH  /users/:id
+        DELETE /users/:id
+    Use:
+        routes
+        controllers
+        services
+    Structure it as:
+        src/
+        ├── app.js
+        ├── server.js
+        ├── routes/
+        │   └── userRoutes.js
+        ├── controllers/
+        │   └── userController.js
+        ├── services/
+        │   └── userService.js
+        └── middleware/
+            └── errorMiddleware.js
+    Use an in-memory array initially. Don't introduce MongoDB yet.
+    The purpose is to make sure you understand the complete flow:
+        HTTP Request
+            ↓
+        Express
+            ↓
+        Middleware
+            ↓
+        Router
+            ↓
+        Controller
+            ↓
+        Service
+            ↓
+        Response
