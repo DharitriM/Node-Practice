@@ -1,0 +1,120 @@
+Asynchronous JavaScript in Node.js
+    This is a core Node.js topic. Almost every real backend operation is asynchronous:
+    Database queries
+    API calls
+    File operations
+    Authentication
+    Redis
+    Sending emails
+    Message queues
+
+
+1. Why do we need asynchronous code?
+    Imagine:
+        const result = database.query("SELECT * FROM users");
+    A database might take:
+        10ms
+        100ms
+        500ms
+    If JavaScript simply stopped and waited:
+        Request 1
+        ↓
+        Database
+        ↓
+        WAIT 500ms
+        ↓
+        Response
+    the Node.js main thread would be doing nothing useful during that wait.
+    Instead, Node starts the operation and can continue processing other work:
+    Request 1 → Database ────────────────┐
+    Request 2 → Process                  │
+    Request 3 → Database ────────┐       │
+    Request 4 → API              │       │
+                                ↓       ↓
+                            callbacks / promises
+    This is the foundation of asynchronous Node.js.
+
+
+2. Synchronous vs asynchronous
+    Synchronous
+    console.log("A");
+    console.log("B");
+    console.log("C");
+
+    Execution:
+        A
+        ↓
+        B
+        ↓
+        C
+    Each statement completes before the next one executes.
+    Asynchronous:
+        console.log("A");
+
+        setTimeout(() => {
+            console.log("B");
+        }, 1000);
+
+        console.log("C");
+    Output:
+        A
+        C
+        B
+    The timer doesn't block the rest of the JavaScript execution.
+
+
+3. Callbacks
+    The oldest common Node.js asynchronous pattern is the callback.
+    Example:
+        const fs = require("node:fs");
+        fs.readFile("data.txt", "utf8", (error, data) => {
+            if (error) {
+                console.log(error);
+                return;
+            }
+            console.log(data);
+        });
+    The function:
+        (error, data) => {}
+    is the callback.
+    Node historically standardized a pattern called error-first callbacks:
+        (error, result) => {}
+    Success:
+        error = null
+        result = actual data
+    Failure:
+        error = Error object
+        result = undefined
+
+
+4. Why callbacks became problematic
+    Imagine:
+        getUser(userId, (err, user) => {
+            getOrders(user.id, (err, orders) => {
+                getProducts(orders, (err, products) => {
+                    sendEmail(user, products, (err) => {
+                        console.log("Done");
+                    });
+                });
+            });
+        });
+    This becomes difficult to:
+        read
+        debug
+        handle errors
+        maintain
+    This is commonly called:   Callback hell
+    That's one reason Promises became popular.
+
+
+5. Promise
+    A Promise represents the eventual result of an asynchronous operation.
+    A Promise has three states:
+                  Promise
+                     │
+            ┌────────┼────────┐
+            ▼        ▼        ▼
+            Pending  Fulfilled Rejected
+    Pending:    Operation hasn't finished.
+    Fulfilled:    Operation succeeded.
+    Rejected:    Operation failed.
