@@ -1,12 +1,12 @@
 Asynchronous JavaScript in Node.js
     This is a core Node.js topic. Almost every real backend operation is asynchronous:
-    Database queries
-    API calls
-    File operations
-    Authentication
-    Redis
-    Sending emails
-    Message queues
+        Database queries
+        API calls
+        File operations
+        Authentication
+        Redis
+        Sending emails
+        Message queues
 
 
 1. Why do we need asynchronous code?
@@ -18,20 +18,20 @@ Asynchronous JavaScript in Node.js
         500ms
     If JavaScript simply stopped and waited:
         Request 1
-        ↓
+            ↓
         Database
-        ↓
+            ↓
         WAIT 500ms
-        ↓
+            ↓
         Response
     the Node.js main thread would be doing nothing useful during that wait.
     Instead, Node starts the operation and can continue processing other work:
-    Request 1 → Database ────────────────┐
-    Request 2 → Process                  │
-    Request 3 → Database ────────┐       │
-    Request 4 → API              │       │
-                                ↓       ↓
-                            callbacks / promises
+        Request 1 → Database ────────────────┐
+        Request 2 → Process                  │
+        Request 3 → Database ────────┐       │
+        Request 4 → API              │       │
+                                    ↓       ↓
+                                callbacks / promises
     This is the foundation of asynchronous Node.js.
 
 
@@ -74,9 +74,11 @@ Asynchronous JavaScript in Node.js
             }
             console.log(data);
         });
+
     The function:
         (error, data) => {}
     is the callback.
+
     Node historically standardized a pattern called error-first callbacks:
         (error, result) => {}
     Success:
@@ -114,7 +116,337 @@ Asynchronous JavaScript in Node.js
                      │
             ┌────────┼────────┐
             ▼        ▼        ▼
-            Pending  Fulfilled Rejected
+        Pending  Fulfilled Rejected
     Pending:    Operation hasn't finished.
     Fulfilled:    Operation succeeded.
     Rejected:    Operation failed.
+
+
+6. Basic Promise
+    const promise = new Promise((resolve, reject) => {
+
+        const success = true;
+
+        if (success) {
+            resolve("Success");
+        } else {
+            reject(new Error("Failed"));
+        }
+    });
+
+    Consume it:
+    promise:
+        .then((result) => {
+            console.log(result);
+        })
+        .catch((error) => {
+            console.error(error);
+        });
+
+
+7. resolve() and reject()
+    resolve(value);
+    means:
+        The asynchronous operation succeeded.
+    reject(error);
+    means:
+        The asynchronous operation failed.
+    For example:
+        function getUser() {
+            return new Promise((resolve, reject) => {
+
+                setTimeout(() => {
+                    resolve({
+                        id: 1,
+                        name: "John"
+                    });
+                }, 1000);
+
+            });
+        }
+    Then:
+        getUser().then((user) => {
+            console.log(user);
+        });
+
+
+8. .then()
+    .then() handles successful Promise results.
+        getUser()
+            .then((user) => {
+                console.log(user);
+            });
+    The value passed to:
+        resolve(user);
+    becomes the argument of:
+        .then(user => ...)
+
+
+9. .catch()
+Handles rejection:
+    getUser()
+        .then((user) => {
+            console.log(user);
+        })
+        .catch((error) => {
+            console.error(error);
+        });
+
+
+10. Promise chaining
+    Suppose:
+        getUser()
+            .then((user) => {
+                return getOrders(user.id);
+            })
+            .then((orders) => {
+                return getProducts(orders);
+            })
+            .then((products) => {
+                console.log(products);
+            })
+            .catch((error) => {
+                console.error(error);
+            });
+    The flow becomes:
+        getUser()
+        ↓
+        user
+        ↓
+        getOrders()
+        ↓
+        orders
+        ↓
+        getProducts()
+        ↓
+        products
+    This is much cleaner than deeply nested callbacks.
+
+
+11. async/await
+    Modern Node.js code commonly uses:
+        async
+        await
+    Instead of:
+        getUser()
+            .then(...)
+    you can write:
+        async function getUserData() {
+
+            const user = await getUser();
+
+            console.log(user);
+        }
+    await waits for the Promise result inside the async function's execution flow without blocking the Node.js event loop.
+    That last distinction matters.
+    await suspends the execution of the current async function until the Promise settles; it does not block the entire Node.js event loop.
+
+
+12. async always returns a Promise
+    This is an interview favorite.
+        async function test() {
+            return "Hello";
+        }
+    Even though you returned a string:
+        test()
+    returns a Promise.
+    Conceptually:
+        test()
+            .then(result => {
+                console.log(result);
+            });
+    Output:
+        Hello
+    So:
+    An async function always returns a Promise.
+
+
+13. await requires a Promise-like value
+    You can technically write:
+        const value = await 10;
+    JavaScript will treat it as an already-resolved value.
+    But normally you'll use:
+        const user = await getUser();
+    where:
+        getUser()
+    returns a Promise.
+
+
+14. Error handling with async/await
+    Use:
+        try/catch
+    Example:
+        async function getUserData() {
+
+            try {
+                const user = await getUser();
+
+                console.log(user);
+            } catch (error) {
+                console.error(error);
+            }
+        }
+    This is equivalent conceptually to:
+        getUser()
+            .then(user => {
+                console.log(user);
+            })
+            .catch(error => {
+                console.error(error);
+            });
+
+
+15. Real Express example
+    app.get("/users/:id", async (req, res, next) => {
+        try {
+            const user = await userService.getUser(req.params.id);
+            res.status(200).json(user);
+        } catch (error) {
+            next(error);
+        }
+    });
+    The flow:
+        HTTP Request
+            ↓
+        Controller
+            ↓
+        await database
+            ↓
+        Success ─────→ response
+            │
+            └─ Error ─→ next(error)
+
+
+16. Sequential execution
+    Consider:
+        const user = await getUser();
+        const orders = await getOrders();
+        const recommendations = await getRecommendations();
+    This is sequential.
+        getUser
+        ↓
+        wait
+        ↓
+        getOrders
+        ↓
+        wait
+        ↓
+        getRecommendations
+    Suppose each takes 1 second.
+    Approximately:
+        1s + 1s + 1s = 3s
+    But what if they don't depend on each other?
+        Then sequential execution is wasteful.
+
+
+17. Parallel execution with Promise.all()
+    Instead:
+        const [users, products, categories] = await Promise.all([
+            getUsers(),
+            getProducts(),
+            getCategories()
+        ]);
+    They can execute concurrently.
+    Conceptually:
+        getUsers()       ────────┐
+        getProducts()    ────────┼──→ Promise.all()
+        getCategories()  ────────┘
+    If each takes approximately 1 second:
+        ~1 second
+    rather than:
+        ~3 seconds
+    assuming they're independent and the underlying systems can handle the concurrency.
+
+
+18. Very important: don't misuse Promise.all()
+    Bad:
+        const user = await getUser();
+        const orders = await getOrders(user.id);
+    You can't parallelize this because:
+        getOrders()
+    depends on:
+        user.id
+    Correct:
+        const user = await getUser();
+        const [orders, recommendations] = await Promise.all([
+            getOrders(user.id),
+            getRecommendations(user.id)
+        ]);
+    Because both operations depend on the user, but not on each other.
+    This is a real performance optimization.
+
+
+19. Promise.all() failure behavior
+    Consider:
+        await Promise.all([
+            task1(),
+            task2(),
+            task3()
+        ]);
+    If:
+        task1 → success
+        task2 → success
+        task3 → failure
+
+    the resulting Promise.all() rejects.
+    You can handle it:
+        try {
+
+            await Promise.all([
+                task1(),
+                task2(),
+                task3()
+            ]);
+
+        } catch (error) {
+            console.error(error);
+        }
+
+
+20. Promise.allSettled()
+    What if you want the result of every operation, even if some fail?
+    Use:
+        const results = await Promise.allSettled([
+            task1(),
+            task2(),
+            task3()
+        ]);
+    You'll get statuses such as:
+        [
+            { status: "fulfilled", value: ... },
+            { status: "rejected", reason: ... },
+            { status: "fulfilled", value: ... }
+        ]
+    Useful for things like:
+        Send notification to 10 services
+    where one failure shouldn't discard the results from the others.
+
+
+21. Promise.race()
+    Returns the first Promise that settles:
+        const result = await Promise.race([
+            apiCall(),
+            timeout()
+        ]);
+    Useful conceptually for:
+        API call
+            vs
+        Timeout
+    Whichever settles first determines the result.
+    Important distinction:
+        race() settles on the first fulfilled or rejected Promise.
+
+
+22. Promise.any()
+    Returns the first fulfilled Promise.
+        const result = await Promise.any([
+            server1(),
+            server2(),
+            server3()
+        ]);
+    If:
+        server1 → failure
+        server2 → success
+        server3 → success
+    you get the successful result from the first fulfillment.
+    If all reject, Promise.any() rejects with an AggregateError.
