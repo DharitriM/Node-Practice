@@ -450,3 +450,105 @@ Handles rejection:
         server3 → success
     you get the successful result from the first fulfillment.
     If all reject, Promise.any() rejects with an AggregateError.
+
+
+23.
+    | Method                 | Behavior                             |
+    | ---------------------- | ------------------------------------ |
+    | `Promise.all()`        | Wait for all; rejects if one rejects |
+    | `Promise.allSettled()` | Wait for all regardless of failure   |
+    | `Promise.race()`       | First Promise to settle wins         |
+    | `Promise.any()`        | First fulfilled Promise wins         |
+
+
+24. What is the output?
+    console.log("A");
+
+    async function test() {
+        console.log("B");
+
+        await Promise.resolve();
+
+        console.log("C");
+    }
+
+    test();
+
+    console.log("D");
+
+    Answer:
+        A
+        B
+        D
+        C
+
+    Why?
+        A
+        ↓
+        test()
+        ↓
+        B
+        ↓
+        await Promise.resolve()
+        ↓
+        test() pauses
+        ↓
+        D
+        ↓
+        microtask executes
+        ↓
+        C
+
+    This is a very important connection between:
+        async/await
+        +
+        Promises
+        +
+        microtask queue
+        +
+        event loop
+
+
+25. 
+console.log("1");
+
+setTimeout(() => {
+    console.log("2");
+}, 0);
+
+Promise.resolve().then(() => {
+    console.log("3");
+});
+
+async function test() {
+    console.log("4");
+
+    await Promise.resolve();
+
+    console.log("5");
+}
+
+test();
+
+console.log("6");
+
+utput:
+
+1
+4
+6
+3
+5
+2
+
+Reason:
+
+Synchronous:
+1
+4
+6
+Promise microtasks:
+3
+5
+Timer:
+2
