@@ -92,3 +92,398 @@ Node.js Event Loop: Deep Dive
         Timer
 
 
+4. setTimeout(..., 0) does NOT mean immediate
+    This is a common interview trap.
+        setTimeout(() => {
+            console.log("Hello");
+        }, 0);
+    0 means approximately:
+        "Don't execute this callback before this minimum delay."
+    It does not mean:
+        "Execute this callback immediately."
+    The callback still needs to wait for:
+        Current synchronous code to finish.
+        Relevant microtasks to be processed.
+        Event-loop scheduling.
+
+
+5. Microtasks
+    Node has an important distinction between:
+       process.nextTick()
+    and
+        Promise microtasks
+    Example:
+        console.log("A");
+
+        process.nextTick(() => {
+            console.log("nextTick");
+        });
+
+        Promise.resolve().then(() => {
+            console.log("Promise");
+        });
+
+        console.log("B");
+    Output:
+        A
+        B
+        nextTick
+        Promise
+    Why?
+        Synchronous code runs first:
+            A
+            B
+    Then Node processes process.nextTick() callbacks.
+    Then Promise microtasks.
+    So conceptually:
+        Synchronous code
+            ↓
+        process.nextTick()
+            ↓
+        Promise microtasks
+            ↓
+        Event loop phases
+
+
+6. process.nextTick() vs Promise
+    process.nextTick(() => {
+        console.log("nextTick");
+    });
+
+    Promise.resolve().then(() => {
+        console.log("Promise");
+    });
+
+    Output:
+        nextTick
+        Promise
+    Why?
+        process.nextTick() has a special, higher-priority queue in Node.
+    process.nextTick() is handled with higher priority than the Promise microtask queue in Node.js. 
+    After the current synchronous operation, Node drains the nextTick queue before processing Promise microtasks.
+
+
+7. Event Loop phases
+    The Node.js event loop has several phases.
+    The simplified model is:
+        Timers
+        ↓
+        Pending callbacks
+        ↓
+        Poll
+        ↓
+        Check
+        ↓
+        Close callbacks
+    The important ones for interviews are:
+    Timers:
+        Handles callbacks from:
+            setTimeout()
+            setInterval()
+    Poll:
+        Handles many I/O-related callbacks.
+        For example:
+            fs.readFile()
+            and network-related operations.
+    Check:
+        This is where:
+            setImmediate()
+        callbacks execute.
+    Close callbacks:
+        Handles close events such as:
+            socket.on("close", ...)
+
+
+8. setTimeout() vs setImmediate()
+    setTimeout(() => {
+        console.log("timeout");
+    }, 0);
+
+    setImmediate(() => {
+        console.log("immediate");
+    });
+
+    From the main module, the ordering can vary.
+    But inside an I/O callback, setImmediate() is typically executed before a zero-delay timer.
+    Example:
+    const fs = require("fs");
+
+    fs.readFile(__filename, () => {
+        setTimeout(() => {
+            console.log("timeout");
+        }, 0);
+
+        setImmediate(() => {
+            console.log("immediate");
+        });
+    });
+
+    Typically:
+        immediate
+        timeout
+    setTimeout schedules a callback for the timers phase after its minimum delay, while setImmediate schedules a callback for the check phase. When scheduled inside an I/O callback, setImmediate generally executes first.
+
+
+9. The most important execution priority
+    1. Synchronous JavaScript
+            ↓
+    2. process.nextTick()
+            ↓
+    3. Promise microtasks
+            ↓
+    4. Event loop phases
+    ├── timers
+    ├── pending callbacks
+    ├── poll
+    ├── check
+    └── close callbacks
+
+
+10. Tricky interview question
+    What is the output?
+        console.log("1");
+
+        setTimeout(() => {
+            console.log("2");
+        }, 0);
+
+        Promise.resolve().then(() => {
+            console.log("3");
+        });
+
+        process.nextTick(() => {
+            console.log("4");
+        });
+
+        console.log("5");
+    First synchronous code:
+        1
+        5
+    Then:
+        process.nextTick()
+    So:
+        4
+    Then Promise:
+        3
+    Then timer:
+        2
+    Final output
+        1
+        5
+        4
+        3
+        2
+
+
+11. Another important example
+    setTimeout(() => {
+        console.log("timeout");
+
+        Promise.resolve().then(() => {
+            console.log("promise inside timer");
+        });
+    }, 0);
+
+    Promise.resolve().then(() => {
+        console.log("promise");
+    });
+
+    Output:
+        promise
+        timeout
+        promise inside timer
+    Why?
+        Initially:
+            Promise microtask
+        runs before the timer.
+        Then the timer callback executes:
+            timeout
+    Inside that callback, another Promise microtask is created, which is then processed before continuing to later event-loop work.
+
+
+12. Why can process.nextTick() be dangerous?
+    Consider:
+        function test() {
+            process.nextTick(test);
+        }
+
+        test();
+    You're continuously adding work to the nextTick queue.
+    This can prevent the event loop from progressing to other phases.
+    Conceptually:
+        nextTick
+        nextTick
+        nextTick
+        nextTick
+        nextTick
+        ...
+    The application can become effectively unresponsive.
+    This is called starvation of the event loop.
+    The same general principle applies to continuously scheduling microtasks.
+
+
+13. What does "blocking Node.js" actually mean?
+    Consider:
+        app.get("/users", (req, res) => {
+
+            for (let i = 0; i < 10_000_000_000; i++) {
+                // CPU-heavy work
+            }
+
+            res.send("Done");
+        });
+    The JavaScript thread is busy doing CPU work.
+    During that time, Node can't efficiently process other JavaScript callbacks.
+    So if 100 users make requests:
+        Request 1
+        ↓
+        Huge CPU calculation
+        ↓
+        Request 2 waits
+        Request 3 waits
+        Request 4 waits
+        ...
+    This is why Node is excellent for I/O-bound workloads, but CPU-heavy operations require special handling.
+
+
+14. Important distinction: async doesn't automatically mean non-blocking
+    This:
+        await someFunction();
+    doesn't automatically make CPU-intensive code non-blocking.
+    For example:
+        async function calculate() {
+            for (let i = 0; i < 10_000_000_000; i++) {
+                // CPU work
+            }
+        }
+    Making the function async does not move the loop to another thread.
+    async/await primarily gives you a cleaner way to work with asynchronous operations.
+
+
+15. Where does the worker pool come in?
+    Node uses libuv's worker pool for certain operations that would otherwise block.
+    For example, some filesystem operations and cryptographic operations can use the worker pool.
+    Conceptually:
+        JavaScript
+            ↓
+        Node/libuv
+            ↓
+        Worker Pool
+        ┌────┬────┬────┬────┐
+        │ T1 │ T2 │ T3 │ T4 │
+        └────┴────┴────┴────┘
+            ↓
+        Result
+            ↓
+        Event Loop
+            ↓
+        Callback
+    Important:
+        The worker pool is NOT the event loop.
+        They are different mechanisms.
+
+
+16. Event Loop vs Worker Pool
+    Event Loop:
+        Responsible for coordinating asynchronous callbacks and event-loop phases.
+    Worker Pool:
+        Provides background threads for certain operations that are offloaded from the main JavaScript execution thread.
+    Node.js executes JavaScript primarily on a single thread, while libuv provides the event loop and a worker pool for certain expensive or blocking operations. This allows Node to handle many concurrent I/O operations without blocking the JavaScript thread.
+
+
+17. Practical backend scenario
+    Imagine your API:
+        GET /dashboard\
+    needs:
+        User data
+        Orders
+        Notifications
+        Analytics
+    Bad approach:
+        const user = await getUser();
+        const orders = await getOrders();
+        const notifications = await getNotifications();
+        const analytics = await getAnalytics();
+    If they're completely independent, you're unnecessarily waiting sequentially.
+    Better:
+        const [
+            user,
+            orders,
+            notifications,
+            analytics
+        ] = await Promise.all([
+            getUser(),
+            getOrders(),
+            getNotifications(),
+            getAnalytics()
+        ]);
+    Now the operations can progress concurrently.
+    This is where understanding the event loop becomes practically useful.
+
+
+18. How to explain Node's concurrency in an interview
+    Node executes JavaScript on a main thread, but it achieves high concurrency through the event loop and asynchronous I/O. While one request is waiting for I/O, Node can process other requests instead of blocking the JavaScript thread. Certain operations can also be delegated to libuv's worker pool."
+
+
+19. Most important interview questions from this topic
+    Q1. What is the Node.js event loop?
+        The event loop is the mechanism that allows Node.js to handle asynchronous operations and execute their callbacks without blocking the main JavaScript thread.
+
+    Q2. Is Node.js single-threaded?
+        JavaScript execution is primarily single-threaded, but Node can use OS-level asynchronous I/O, libuv's worker pool, and worker threads for certain workloads.
+
+    Q3. Does setTimeout(fn, 0) execute immediately?
+        No. It schedules the callback to run after the minimum delay when the event loop reaches the appropriate phase.
+
+    Q4. Which runs first: process.nextTick() or Promise?
+        process.nextTick() is processed before Promise microtasks in Node.js.
+
+    Q5. setTimeout vs setImmediate?
+        setTimeout executes in the timers phase, while setImmediate executes in the check phase. Inside an I/O callback, setImmediate generally runs first.
+
+    Q6. What blocks the event loop?
+    Examples:
+        Huge synchronous loops
+        CPU-intensive calculations
+        Synchronous filesystem operations
+        Large synchronous JSON processing
+        Expensive synchronous encryption/compression
+
+    Q7. How do you handle CPU-intensive work?
+        Possible solutions:
+            worker_threads
+            separate processes/services
+            background job queues
+            moving computation to another service
+            One mental model to remember
+
+
+When you see Node code, think:
+                JavaScript
+                    │
+                    ▼
+              Call Stack
+                    │
+          ┌─────────┴─────────┐
+          │                   │
+     Synchronous          Async operation
+                              │
+                    ┌─────────┴─────────┐
+                    │                   │
+                OS / I/O           libuv pool
+                    │                   │
+                    └─────────┬─────────┘
+                              ▼
+                         Event Loop
+                              │
+                    ┌─────────┴─────────┐
+                    ▼                   ▼
+              Microtasks          Event phases
+                    │                   │
+                    └─────────┬─────────┘
+                              ▼
+                         Call Stack
+
+
+Your key takeaway
+Node.js concurrency = single JS thread + event loop + asynchronous I/O + libuv mechanisms.
