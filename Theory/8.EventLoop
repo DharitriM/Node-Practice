@@ -1,0 +1,94 @@
+Node.js Event Loop: Deep Dive
+
+1. First, the big picture
+    When you run:
+        console.log("A");
+
+        setTimeout(() => {
+            console.log("B");
+        }, 0);
+
+        console.log("C");
+    Output:
+        A
+        C
+        B
+    Why?
+        Because JavaScript runs synchronous code first. The timer callback doesn't execute immediately; it gets handled asynchronously and runs later when the event loop gets to it.
+    Think of Node like this:
+            JavaScript Code
+                ↓
+            Call Stack
+                ↓
+        ┌──────────────┐
+        │  Event Loop  │
+        └──────────────┘
+            ↓       ↓
+        Timers    I/O
+            ↓       ↓
+        setTimeout  fs/network
+                    ↓
+                Callbacks
+
+
+2. Call Stack
+    The call stack executes JavaScript synchronously.
+    Example:
+        function one() {
+            console.log("one");
+        }
+
+        function two() {
+            console.log("two");
+            one();
+        }
+
+        two();
+    Execution:
+        two()
+        ↓
+        console.log("two")
+        ↓
+        one()
+        ↓
+        console.log("one")
+    Output:
+        two
+        one
+    The stack follows LIFO — Last In, First Out.
+
+
+3. Where does setTimeout go?
+    Consider:
+        console.log("Start");
+
+        setTimeout(() => {
+            console.log("Timer");
+        }, 0);
+
+        console.log("End");
+    Execution:
+        Step 1
+        console.log("Start");
+    Call stack:
+        console.log("Start")
+    Output:
+        Start
+        Step 2
+        setTimeout(...)
+    Node registers the timer.
+    The callback does not immediately go onto the call stack.
+        Step 3
+        console.log("End");
+    Output:
+        End
+        Step 4
+    The event loop eventually allows the timer callback to execute.
+    Output:
+       Timer
+    Final:
+        Start
+        End
+        Timer
+
+
