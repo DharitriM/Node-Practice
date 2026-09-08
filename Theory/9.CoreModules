@@ -1,0 +1,259 @@
+Core modules are built into Node.js, so you don't install them with npm.
+
+fs       → File system
+path     → File/directory paths
+os       → Operating system information
+events   → EventEmitter
+http     → HTTP server/client
+crypto   → Hashing, encryption, random values
+url      → URL parsing
+process  → Process/runtime information
+util     → Utility functions
+
+
+1. fs — File System
+    Used to work with files and directories.
+
+    const fs = require("fs");
+
+    Synchronous
+        const data = fs.readFileSync("test.txt", "utf8");
+        console.log(data);
+    This blocks the event loop until the file is read.
+
+    Asynchronous
+        fs.readFile("test.txt", "utf8", (err, data) => {
+            if (err) {
+                console.error(err);
+                return;
+            }
+
+            console.log(data);
+        });
+    This is preferred in server applications because Node can continue processing other work.
+    Modern approach:
+        const fs = require("fs/promises");
+
+        async function readFile() {
+            const data = await fs.readFile("test.txt", "utf8");
+            console.log(data);
+        }
+    Common methods
+        fs.readFile()
+        fs.writeFile()
+        fs.appendFile()
+        fs.unlink()
+        fs.mkdir()
+        fs.readdir()
+        fs.rename()
+        fs.stat()
+
+    Q: Difference between readFile and readFileSync?
+        readFile is asynchronous and doesn't block the JavaScript thread while waiting for the operation, whereas readFileSync blocks execution until the operation completes. I generally prefer asynchronous APIs in server-side request handling.
+
+
+2. path
+    Used for safely handling filesystem paths.
+        const path = require("path");
+    Example:
+        const filePath = path.join(__dirname, "uploads", "image.jpg");
+        console.log(filePath);
+    Important methods:
+        path.join()
+        path.resolve()
+        path.basename()
+        path.dirname()
+        path.extname()
+    Example:
+        const file = "/app/uploads/photo.jpg";
+        console.log(path.basename(file)); // photo.jpg
+        console.log(path.dirname(file));  // /app/uploads
+        console.log(path.extname(file));  // .jpg
+
+        join() vs resolve()
+            path.join("app", "uploads", "file.txt");
+                combines path segments.
+            path.resolve("app", "uploads", "file.txt");
+                creates an absolute path from the current working directory.
+
+    Why use path.join() instead of manually concatenating paths?
+        It handles platform-specific path separators correctly and makes path construction safer and more portable.
+
+
+3. os
+    Provides information about the operating system.
+        const os = require("os");
+    Useful methods:
+        os.platform()
+        os.arch()
+        os.cpus()
+        os.totalmem()
+        os.freemem()
+        os.hostname()
+        os.homedir()
+        os.tmpdir()
+    Example:
+        console.log(os.platform());
+        console.log(os.cpus().length);
+        console.log(os.totalmem());
+    Real-world use:
+        system monitoring
+        diagnostics
+        determining CPU count
+        logging environment information
+
+
+4. process
+    process is a global Node.js object.
+    You don't need:
+        const process = require("process");
+    You can directly use:
+        process
+    Important properties:
+        process.env
+        process.argv
+        process.pid
+        process.cwd()
+        process.version
+    Environment variables
+        const port = process.env.PORT || 3000;
+    Very common in backend applications.
+    For example:
+        PORT=5000
+        DB_URL=mongodb://...
+        JWT_SECRET=abc123
+    Don't hardcode secrets into source code.
+        process.argv
+    Command-line arguments:
+        node app.js hello
+    Then:
+        console.log(process.argv);
+    contains the command-line arguments.
+        process.cwd()
+    Returns the current working directory:
+        console.log(process.cwd());
+
+
+5. url
+    Used for parsing and manipulating URLs.
+    Modern Node applications commonly use the built-in URL class:
+        const url = new URL(
+            "https://example.com/products?page=2&limit=10"
+        );
+
+        console.log(url.pathname);
+        console.log(url.searchParams.get("page"));
+        console.log(url.searchParams.get("limit"));
+    Output:
+        /products
+        2
+        10
+    This is useful for handling query parameters and URLs.
+
+
+6. crypto
+    const crypto = require("crypto");
+    Used for:
+        cryptographic hashing
+        random values
+        signatures
+        encryption/decryption
+        security-related operations
+        Hash example
+
+    const hash = crypto
+        .createHash("sha256")
+        .update("hello")
+        .digest("hex");
+    console.log(hash);
+
+    Hashing is one-way; 
+    encryption is reversible with the appropriate key.
+
+    Passwords:
+        Do not normally implement password storage using:
+            crypto.createHash("sha256")
+        by itself.
+        For passwords, use a password hashing algorithm such as:
+            bcrypt
+            argon2
+        with an appropriate password-storage strategy.
+
+
+7. events — EventEmitter
+    This one is particularly important because Node's architecture heavily uses events.
+        const EventEmitter = require("events");
+        const emitter = new EventEmitter();
+    Register listener:
+        emitter.on("login", (user) => {
+            console.log(`${user} logged in`);
+        });
+    Emit event:
+        emitter.emit("login", "Dharitri");
+    Output:
+        Dharitri logged in
+        .on() vs .once()
+        emitter.on("login", handler);
+    Runs every time the event occurs.
+        emitter.once("login", handler);
+    Runs only once.
+    Example:
+        emitter.once("startup", () => {
+            console.log("Application started");
+        });
+        emitter.emit("startup");
+        emitter.emit("startup");
+    Output:
+        Application started
+
+
+8. Why EventEmitter matters
+    Node internally uses an event-driven architecture.
+    Examples include:
+        server.on("request", ...)
+        socket.on("data", ...)
+        stream.on("data", ...)
+    You can also use EventEmitter in your application for things like:
+        User registered
+            ↓
+        emit("userRegistered")
+            ↓
+        Email service
+        Analytics
+        Notification
+        Audit logging
+    But don't turn your entire application into an event-driven maze. 
+    For business-critical flows, explicit service calls or a proper message broker can be easier to reason about.
+
+
+| Module    | Main purpose                |
+| --------- | --------------------------- |
+| `fs`      | Files/directories           |
+| `path`    | Path manipulation           |
+| `os`      | OS information              |
+| `process` | Runtime/process information |
+| `url`     | URL parsing                 |
+| `crypto`  | Cryptographic operations    |
+| `events`  | Event-driven programming    |
+| `http`    | HTTP server/client          |
+| `util`    | Node utility functions      |
+
+
+Interview questions you should know
+    1. Is fs.readFileSync() recommended in an API request handler?
+        Usually no, because it blocks the event loop.
+
+    2. Why use the path module?
+        For safe, cross-platform filesystem path manipulation.
+
+    3. What is process.env?
+        An object containing environment variables available to the Node.js process.
+
+    4. What is EventEmitter?
+        A Node.js mechanism for creating objects that emit named events and allow listeners to subscribe to those events.
+
+    5. .on() vs .once()?
+        on() listens repeatedly; once() handles the event only once.
+
+    6. Hashing vs encryption?
+        Hashing is designed to be one-way; encryption is reversible using the appropriate key.
