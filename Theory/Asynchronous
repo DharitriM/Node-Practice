@@ -510,45 +510,154 @@ Handles rejection:
 
 
 25. 
-console.log("1");
+    console.log("1");
 
-setTimeout(() => {
-    console.log("2");
-}, 0);
+    setTimeout(() => {
+        console.log("2");
+    }, 0);
 
-Promise.resolve().then(() => {
-    console.log("3");
-});
+    Promise.resolve().then(() => {
+        console.log("3");
+    });
 
-async function test() {
-    console.log("4");
+    async function test() {
+        console.log("4");
 
-    await Promise.resolve();
+        await Promise.resolve();
 
-    console.log("5");
-}
+        console.log("5");
+    }
 
-test();
+    test();
 
-console.log("6");
+    console.log("6");
 
-utput:
+    output:
+        1
+        4
+        6
+        3
+        5
+        2
 
-1
-4
-6
-3
-5
-2
+    Reason:
+        Synchronous:
+            1
+            4
+            6
+        Promise microtasks:
+            3
+            5
+        Timer:
+            2
 
-Reason:
 
-Synchronous:
-1
-4
-6
-Promise microtasks:
-3
-5
-Timer:
-2
+26. Common mistake: sequential database queries
+    Bad:
+        const users = await User.find();
+        const products = await Product.find();
+        const categories = await Category.find();
+    If they're independent, this unnecessarily serializes them.
+    Better:
+        const [users, products, categories] = await Promise.all([
+            User.find(),
+            Product.find(),
+            Category.find()
+        ]);
+    But don't blindly use Promise.all() everywhere.
+    If you launch:
+        Promise.all([
+            10000DatabaseQueries()
+        ])
+    you may overload:
+        database connection pool
+        external APIs
+        CPU
+        memory
+    Concurrency should be controlled where necessary.
+
+
+27. Real-world concurrency
+    Suppose you need to process 10,000 users.
+    Don't necessarily do:
+        await Promise.all(
+            users.map(user => processUser(user))
+        );
+    That can create thousands of concurrent operations.
+    Instead, you may process them in batches:
+        100 users
+        ↓
+        wait
+        ↓
+        next 100
+        ↓
+        wait
+        ↓
+        next 100
+
+
+28. Interview questions
+    Q1. What is asynchronous programming?
+        It allows an application to initiate an operation and continue executing other work instead of synchronously waiting for that operation to complete.
+
+    Q2. What is a Promise?
+        A Promise represents the eventual completion or failure of an asynchronous operation and its resulting value.
+
+    Q3. What are the states of a Promise?
+        Pending, fulfilled, and rejected.
+
+    Q4. What does async do?
+        It makes a function return a Promise and allows the use of await inside the function.
+
+    Q5. What does await do?
+        It pauses the execution of the current async function until the awaited Promise settles, while not blocking the entire Node.js event loop.
+
+    Q6. How do you handle errors with async/await?
+        Use try/catch, or propagate the rejected Promise to a higher-level error handler.
+
+    Q7. Difference between sequential and parallel asynchronous operations?
+        Sequential operations wait for one operation before starting the next. Independent operations can be started concurrently using mechanisms such as Promise.all(), reducing total latency.
+
+    Q8. Difference between Promise.all() and Promise.allSettled()?
+        Promise.all() rejects when any input Promise rejects, while Promise.allSettled() waits for every Promise and returns each one's fulfillment or rejection status.
+
+    Q9. Does await block Node.js?
+        No. It suspends the current async function's continuation; it doesn't block the Node.js event loop from processing other work.
+
+    Q10. When should you use Promise.all()?
+        When multiple asynchronous operations are independent and can safely execute concurrently.
+
+
+Practical Exercise:
+    Build this function:
+        async function getDashboardData() {
+
+            // get users
+            // get products
+            // get orders
+
+        }
+    Assume:
+        getUsers()
+        getProducts()
+        getOrders()
+    all return Promises and are independent.
+    Implement it using:
+        Promise.all()
+    Then intentionally make one reject and observe what happens.
+    After that, rewrite it using:
+        Promise.allSettled()
+    and compare the results.
+
+    What you should now understand
+        Callback
+        ↓
+        Promise
+        ↓
+        async/await
+        ↓
+        Promise.all()
+        ↓
+        Concurrency
+        ↓
+        Event Loop + Microtasks
