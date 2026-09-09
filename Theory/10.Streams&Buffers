@@ -1,2 +1,349 @@
 Streams & Buffers
 
+1. What is a Buffer?
+    A Buffer is a Node.js object used to work with raw binary data.
+    JavaScript normally works with strings and objects, but when Node handles things like:
+        files
+        images
+        videos
+        network packets
+        binary data
+    it often works with Buffer.
+        const buffer = Buffer.from("Hello");
+        console.log(buffer);
+        console.log(buffer.toString());
+    Conceptually:
+        "Hello"
+        ↓
+        Buffer
+        ↓
+        Binary data
+
+
+2. Why do we need Buffers?
+    Suppose you read an image:
+        const fs = require("fs");
+        const data = fs.readFileSync("image.jpg");
+        console.log(data);
+    The result is binary data represented as a Buffer.
+    You can inspect:
+        console.log(data.length);
+    For example, if the image is 5 MB, the Buffer contains approximately 5 MB of binary data.
+
+    A Buffer is a region of memory used by Node.js to handle raw binary data, 
+    especially when working with files, streams, and network operations.
+
+
+3. Creating a Buffer
+    const buffer = Buffer.from("Hello");
+    Convert back to string:
+        console.log(buffer.toString());
+    You can also create a buffer of a fixed size:
+        const buffer = Buffer.alloc(10);
+    This creates a zero-filled buffer of 10 bytes.
+
+
+4. What is a Stream?
+    A stream allows you to process data piece by piece instead of loading everything into memory at once.
+    Imagine a 2 GB video.
+        Without stream
+            2 GB file
+            ↓
+            Load entire file
+            ↓
+            Memory
+            ↓
+            Process
+    Potentially huge memory usage.
+        With stream
+            2 GB file
+            ↓
+            Chunk → process
+            Chunk → process
+            Chunk → process
+            Chunk → process
+            ...
+    Only a portion needs to be handled at a time.
+    This is the major reason streams are important.
+
+
+5. Example: Reading a large file
+    const fs = require("fs");
+
+    const stream = fs.createReadStream("large-file.txt");
+
+    stream.on("data", (chunk) => {
+        console.log("Received chunk:", chunk.length);
+    });
+
+    stream.on("end", () => {
+        console.log("Finished");
+    });
+
+    Instead of:
+        fs.readFile(...)
+    loading the entire file into memory, createReadStream() processes it in chunks.
+
+
+6. Stream types
+    There are four major types.
+    1. Readable
+        You can read data from it.
+        Examples:
+            fs.createReadStream()
+            HTTP request
+    2. Writable
+        You can write data to it.
+        Examples:
+            fs.createWriteStream()
+            HTTP response
+    3. Duplex
+        Both readable and writable.
+        Example:
+            TCP socket
+    4. Transform
+        A Duplex stream that can modify data while it passes through.
+        Examples:
+            compression
+            encryption
+            data transformation
+    Readable streams provide data, writable streams consume data, duplex streams support both directions, and transform streams modify data as it passes through.
+
+
+7. Most important concept — pipe()
+    Instead of manually handling chunks:
+        const fs = require("fs");
+
+        const readStream = fs.createReadStream("input.txt");
+        const writeStream = fs.createWriteStream("output.txt");
+
+        readStream.on("data", (chunk) => {
+            writeStream.write(chunk);
+        });
+    You can use:
+        readStream.pipe(writeStream);
+    Much cleaner.
+    Conceptually:
+        input.txt
+            ↓
+        Readable Stream
+            ↓
+        pipe()
+            ↓
+        Writable Stream
+            ↓
+        output.txt
+
+
+8. Real-world example — file download
+    Suppose your API needs to send a large file.
+    Bad approach:
+        const data = await fs.promises.readFile("video.mp4");
+        res.end(data);
+    The entire file gets loaded into memory first.
+    Better:
+        const stream = fs.createReadStream("video.mp4");
+        stream.pipe(res);
+    Now:
+        File
+        ↓
+        Read chunk
+        ↓
+        HTTP response
+        ↓
+        Client
+    This is much more memory-efficient.
+
+
+9. HTTP requests are streams
+    In Node:
+        req:    is a Readable Stream.
+    And:
+        res:    is a Writable Stream.
+    So conceptually:
+        Client
+        ↓
+        HTTP Request
+        ↓
+        Readable Stream
+        ↓
+        req
+    Your Server
+        res
+        ↓
+        Writable Stream
+        ↓
+        HTTP Response
+        ↓
+        Client
+    This explains why request bodies can arrive in chunks.
+
+
+10. What is a chunk?
+    A stream doesn't necessarily give you the entire data at once.
+    Example:
+        stream.on("data", (chunk) => {
+            console.log(chunk);
+        });
+    Each chunk is a piece of the data.
+    It is often a Buffer.
+        stream.on("data", (chunk) => {
+            console.log(Buffer.isBuffer(chunk));
+        });
+
+
+11. Backpressure
+    Suppose:
+        Readable
+        ↓
+        produces data very fast
+        ↓
+        Writable
+        ↓
+        consumes data slowly
+    The producer can overwhelm the consumer.
+    This is called backpressure.
+        Producer ───────────► Consumer
+        FAST                  SLOW
+    Streams help manage this situation.
+    pipe() is useful because Node handles flow control/backpressure between the streams.
+
+    Backpressure occurs when a writable stream cannot consume data as quickly as a readable stream produces it. 
+    Node streams provide mechanisms such as pipe() to manage this flow and prevent uncontrolled memory growth.
+
+
+12. highWaterMark
+    It controls approximately how much data a stream buffers internally before applying backpressure.
+    Example:
+        const stream = fs.createReadStream("large.txt", {
+            highWaterMark: 64 * 1024
+        });
+    That's approximately:
+        64 KB
+    Don't memorize exact defaults because they vary by stream type and Node version.
+    highWaterMark controls the stream's internal buffering threshold.
+
+
+13. Important stream events
+    For Readable streams:
+        data
+        end
+        error
+    Example:
+        stream.on("data", chunk => {
+            console.log(chunk);
+        });
+
+        stream.on("end", () => {
+            console.log("Done");
+        });
+
+        stream.on("error", err => {
+            console.error(err);
+        });
+
+    For Writable streams, you'll commonly encounter:
+        drain
+        finish
+        error
+
+
+14. Stream vs Buffer
+    This distinction is frequently asked.
+    Buffer
+        Represents data in memory.
+    Stream
+        Represents a mechanism for processing/transferring data over time, usually in chunks.
+    Think:
+        Buffer = the data chunk
+        Stream = the process of moving/processing chunks
+
+
+15. Practical interview scenario:
+    "You need to create an API that downloads a 5 GB file. How would you implement it?"
+    "I wouldn't use readFile to load the entire file into memory. 
+    I'd use fs.createReadStream() and pipe it directly to the HTTP response. 
+    This allows the file to be transferred in chunks and keeps memory usage much lower."
+    Example:
+        app.get("/download", (req, res) => {
+            const stream = fs.createReadStream("./large-file.zip");
+
+            res.setHeader(
+                "Content-Disposition",
+                "attachment; filename=large-file.zip"
+            );
+
+            stream.pipe(res);
+        });
+
+
+16. Streams and file uploads
+    For large uploads, you also want to avoid unnecessarily buffering the entire file.
+    Conceptually:
+        Client
+        ↓
+        HTTP Request Stream
+        ↓
+        Server
+        ↓
+        File Write Stream
+        ↓
+        Disk
+    Depending on your framework/multipart library, uploads may be parsed/buffered differently, s
+    So you need to choose the implementation carefully for very large files.
+
+17. Interview questions — memorize these
+    Q: What is a Buffer?
+        A Buffer is used by Node.js to represent and manipulate raw binary data in memory.
+
+    Q: What is a Stream?
+        A Stream allows data to be processed incrementally in chunks instead of loading the entire dataset into memory.
+
+    Q: What are the four types of streams?
+        Readable, Writable, Duplex, and Transform.
+
+    Q: What does pipe() do?
+        It connects a readable stream to a writable stream and helps transfer data while managing flow control.
+
+    Q: What is backpressure?
+        It's the condition where a data producer is faster than the consumer. Streams manage this to prevent excessive buffering and memory usage.
+
+    Q: Why use streams for large files?
+        They reduce memory usage because the entire file doesn't need to be loaded into memory at once.
+
+    Q: Is an HTTP request a stream in Node?
+        Yes. The incoming request is a Readable stream, and the response is a Writable stream.
+
+
+What you need to remember
+            Buffer
+            ↓
+            Binary data in memory
+
+            Stream
+            ↓
+            Process data incrementally
+
+            Readable
+            ↓
+            Read data
+
+            Writable
+            ↓
+            Write data
+
+            Duplex
+            ↓
+            Read + Write
+
+            Transform
+            ↓
+            Read + Write + Transform
+
+            pipe()
+            ↓
+            Connect streams
+
+            Backpressure
+            ↓
+            Producer faster than consumer
