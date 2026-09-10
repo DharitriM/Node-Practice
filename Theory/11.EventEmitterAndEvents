@@ -1,0 +1,293 @@
+EventEmitter And Events
+
+1. What is EventEmitter?
+    EventEmitter is a Node.js class that allows an object to:
+        Emit an event
+        Listen for an event
+        Execute a callback when that event occurs
+    
+    const EventEmitter = require("events");
+    const emitter = new EventEmitter();
+
+    emitter.on("login", (username) => {
+        console.log(`${username} logged in`);
+    });
+
+    emitter.emit("login", "Dharitri");
+
+    Output:
+        Dharitri logged in
+
+    The basic pattern is:
+        emit("event")
+            ↓
+        listeners
+            ↓
+        callbacks execute
+
+
+2. .on() — Listen to an event
+    emitter.on("orderCreated", (order) => {
+        console.log("Order created:", order);
+    });
+
+    Every time the event is emitted:
+
+    emitter.emit("orderCreated", 101);
+    emitter.emit("orderCreated", 102);
+
+    The listener runs twice.
+
+
+3. .once() — Listen only once
+    emitter.once("connected", () => {
+        console.log("Connected");
+    });
+
+    If:
+        emitter.emit("connected");
+        emitter.emit("connected");
+    Output:
+        Connected
+    The listener is automatically removed after the first execution.
+
+    .on() vs .once()?
+        .on() keeps listening for every occurrence of an event, while .once() automatically removes the listener after the first occurrence.
+
+
+4. .emit()
+    Used to trigger an event:
+        emitter.emit("userRegistered", user);
+
+    You can pass arguments:
+        emitter.on("userRegistered", (name, email) => {
+            console.log(name);
+            console.log(email);
+        });
+        emitter.emit(
+            "userRegistered",
+            "John",
+            "john@example.com"
+        );
+
+
+5. .off() / .removeListener()
+    You can remove a listener.
+        function handleLogin(user) {
+            console.log(user);
+        }
+
+        emitter.on("login", handleLogin);
+
+        emitter.off("login", handleLogin);
+
+    Equivalent older API:
+        emitter.removeListener("login", handleLogin);
+
+    Important: you need the same function reference to remove the listener.
+
+
+6. Practical backend example
+    Imagine a user registration API:
+        POST /register
+            ↓
+        Create user
+            ↓
+        emit("userRegistered")
+            ↓
+        ┌──────────────┬──────────────┐
+        ↓              ↓              ↓
+        Send email   Analytics     Audit log
+
+    Implementation:
+        const EventEmitter = require("events");
+
+        const events = new EventEmitter();
+
+        events.on("userRegistered", (user) => {
+            console.log("Send welcome email:", user.email);
+        });
+
+        events.on("userRegistered", (user) => {
+            console.log("Track registration:", user.id);
+        });
+
+        function registerUser(user) {
+            // save user to database...
+
+            events.emit("userRegistered", user);
+        }
+
+    This creates loose coupling between the registration logic and listeners.
+
+
+7. But EventEmitter is NOT a message queue
+    EventEmitter works inside the same Node.js process.
+        Node Process
+        ├── API
+        ├── EventEmitter
+        └── Listeners
+    If your application crashes, those in-memory events are gone.
+    For distributed systems, you might use:
+        RabbitMQ
+        Kafka
+        AWS SQS
+        Redis Streams
+    Conceptually:
+        Service A
+        ↓
+        Message Broker
+        ↓
+        Service B
+
+    EventEmitter is an in-process event mechanism. It is useful for decoupling components within a Node.js application, but it isn't a durable distributed messaging system like Kafka or RabbitMQ.
+
+
+8. Important: EventEmitter listeners are synchronous
+    emitter.on("test", () => {
+        console.log("Listener");
+    });
+
+    console.log("Before");
+    emitter.emit("test");
+    console.log("After");
+
+    Output:
+        Before
+        Listener
+        After
+
+    emit() invokes registered listeners synchronously.
+    This means a CPU-heavy listener can block the event loop.
+        emitter.on("test", () => {
+            // huge CPU-heavy loop
+        });
+
+    Don't assume:
+        It's an event, therefore it's asynchronous.
+    
+    Events and asynchronous execution are separate concepts.
+
+
+9. Error events
+    If an EventEmitter emits an "error" event and there is no error listener, Node can terminate the process.
+        emitter.on("error", (err) => {
+            console.error("Something went wrong:", err);
+        });
+
+        emitter.emit("error", new Error("Database failed"));
+
+    So for custom EventEmitters, handle "error" when errors may be emitted.
+
+
+10. Memory leak warning
+    Suppose you repeatedly add listeners:
+        emitter.on("data", handler);
+
+    without removing them.
+    Eventually you can have:
+        Event
+        ↓
+        Listener 1
+        Listener 2
+        Listener 3
+        ...
+        Listener 100
+
+    This can cause unnecessary memory usage and Node may warn about too many listeners.
+    Common causes:
+        registering listeners inside frequently called functions
+        forgetting to remove listeners
+        repeatedly creating subscriptions
+
+    Q. Your Node application shows a MaxListenersExceededWarning. What would you investigate?
+        I'd check whether listeners are being registered repeatedly without cleanup, 
+        especially inside request handlers, loops, or long-lived subscriptions. 
+        I wouldn't simply increase the listener limit without identifying the underlying leak.
+
+
+11. EventEmitter vs Promises
+    Promise:
+        Represents the result of one asynchronous operation.
+            const result = await getUser();
+    
+    EventEmitter:
+        Represents multiple occurrences of events over time.
+            emitter.on("message", handler);
+    
+    Think:
+        Promise:
+            One result
+                ↓
+            resolve / reject
+
+        EventEmitter:
+            Many events
+                ↓
+            event → event → event → event
+
+
+12. EventEmitter vs callback
+    Callback:
+        getUser((err, user) => {
+            // one callback
+        });
+
+    EventEmitter:
+        socket.on("data", chunk => {
+            // potentially many times
+        });
+
+    So:
+        Callback → generally one result/callback execution
+        EventEmitter → potentially many events over time
+
+
+13. Real Node.js examples
+    HTTP server:
+        server.on("request", handler);
+    
+    Streams:
+        stream.on("data", handler);
+        stream.on("end", handler);
+    
+    Socket:
+        socket.on("data", handler);
+        socket.on("close", handler);
+
+    Node uses this event-driven pattern heavily.
+
+
+14. Most important interview questions
+    Q1. What is EventEmitter?
+        EventEmitter is a Node.js mechanism for implementing event-driven behavior where objects can emit named events and other parts of the application can listen for them.
+
+    Q2. How do you create an EventEmitter?
+        const EventEmitter = require("events");
+        const emitter = new EventEmitter();
+
+    Q3. on() vs once()?
+        on() handles every occurrence; once() handles only the first occurrence.
+
+    Q4. Is EventEmitter asynchronous?
+        Not inherently. EventEmitter invokes listeners synchronously when emit() is called. The listener itself can start asynchronous work.
+
+    Q5. EventEmitter vs message broker?
+        EventEmitter is in-process and in-memory; message brokers provide mechanisms for communication between processes/services and can provide durability and delivery guarantees depending on the system.
+
+    Q6. What happens if an "error" event has no listener?
+        An unhandled EventEmitter error event can cause the Node.js process to throw and terminate.
+
+
+
+Remember this
+EventEmitter
+    │
+    ├── on()       → listen repeatedly
+    ├── once()     → listen once
+    ├── emit()     → trigger event
+    ├── off()      → remove listener
+    └── error      → handle emitter errors
+
+Key interview trap:
+    Event-driven does not mean asynchronous. emit() calls listeners synchronously unless you explicitly introduce asynchronous behavior.
