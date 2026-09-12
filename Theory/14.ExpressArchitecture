@@ -1,0 +1,562 @@
+Express Architecture
+
+The key idea:
+    Request
+    ↓
+    Route
+    ↓
+    Middleware
+    ↓
+    Controller
+    ↓
+    Service
+    ↓
+    Repository / Model
+    ↓
+    Database
+    ↓
+    Response
+
+
+1. Why not put everything in the route?
+    Bad:
+        app.post("/users", async (req, res) => {
+            const { name, email } = req.body;
+
+            if (!name || !email) {
+                return res.status(400).json({
+                    message: "Invalid data"
+                });
+            }
+
+            const existingUser = await User.findOne({ email });
+
+            if (existingUser) {
+                return res.status(409).json({
+                    message: "Email already exists"
+                });
+            }
+
+            const user = await User.create({
+                name,
+                email
+            });
+
+            res.status(201).json(user);
+        });
+
+    It works, but as the application grows, routes become huge.
+    You end up with:
+        Routes
+        ├── validation
+        ├── authentication
+        ├── business logic
+        ├── database queries
+        ├── error handling
+        └── response formatting
+
+    Hard to maintain and test.
+
+
+2. Better architecture
+Separate responsibilities:
+    routes/
+    controllers/
+    services/
+    repositories/
+    models/
+    middlewares/
+    utils/
+
+Example:
+    src/
+    ├── routes/
+    │   └── user.routes.js
+    ├── controllers/
+    │   └── user.controller.js
+    ├── services/
+    │   └── user.service.js
+    ├── repositories/
+    │   └── user.repository.js
+    ├── models/
+    │   └── user.model.js
+    ├── middlewares/
+    │   ├── auth.js
+    │   └── error.js
+    ├── utils/
+    │   └── response.js
+    └── app.js
+
+
+3. Routes
+    Routes define:
+        Which endpoint maps to which handler?
+            router.post(
+                "/users",
+                validateUser,
+                userController.createUser
+            );
+
+    The route should generally remain thin.
+    It shouldn't contain your business logic.
+
+
+4. Controller
+    The controller handles the HTTP layer.
+    It deals with:
+        req
+        res
+        HTTP status codes
+        request parameters
+        calling service
+
+    Example:
+        const createUser = async (req, res, next) => {
+            try {
+                const user = await userService.createUser(req.body);
+
+                res.status(201).json({
+                    data: user
+                });
+            } catch (error) {
+                next(error);
+            }
+        };
+
+    The controller says:
+        "I received an HTTP request. I'll pass the relevant data to the business layer and return an HTTP response."
+
+
+5. Service
+    The service contains business logic.
+
+    Example:
+        const createUser = async (data) => {
+            const existingUser =
+                await userRepository.findByEmail(data.email);
+
+            if (existingUser) {
+                throw new Error("Email already exists");
+            }
+
+            return userRepository.create(data);
+        };
+
+    The service shouldn't care whether the request came from:
+        REST API
+        GraphQL
+        CLI
+        background job
+
+    Its job is business logic.
+
+
+6. Repository
+    Repository handles data access.
+
+    Example:
+        const findByEmail = (email) => {
+            return User.findOne({ email });
+        };
+
+        const create = (data) => {
+            return User.create(data);
+        };
+
+    The repository abstracts database operations.
+    Conceptually:
+        Service
+        ↓
+        Repository
+        ↓
+        Database
+
+
+7. Model
+    The model represents the database structure/ORM/ODM mapping.
+
+    For Mongoose:
+        const userSchema = new mongoose.Schema({
+            name: String,
+            email: {
+                type: String,
+                unique: true
+            }
+        });
+
+        const User = mongoose.model("User", userSchema);
+
+
+8. Complete flow
+    Suppose:
+        POST /api/users
+
+    Request:
+        {
+            "name": "John",
+            "email": "john@example.com"
+        }
+
+    Flow:
+        POST /api/users
+                ↓
+            Router
+                ↓
+        Middleware
+                ↓
+            Controller
+                ↓
+            Service
+                ↓
+        Repository
+                ↓
+            Model
+                ↓
+            Database
+
+    Response travels back:
+        Database
+        ↓
+        Repository
+        ↓
+        Service
+        ↓
+        Controller
+        ↓
+        HTTP Response
+
+
+9. Why Service layer?
+    Suppose you have:
+        createUser()
+    and the same business operation is needed by:
+        REST API
+        Admin API
+        Background job
+        CLI
+
+    If business logic lives inside the controller, you'll duplicate it.
+    Instead:
+              User Service
+             /     |      \
+            /      |       \
+        REST     Admin     Job
+
+    Now business logic is reusable.
+
+    Interview answer
+        "I keep business logic in the service layer so it isn't tightly coupled to Express or the HTTP layer. This improves separation of concerns, reusability, and testability."
+
+
+10. Controller vs Service
+    Controller:
+        Concerned with:
+            HTTP
+            req
+            res
+            status codes
+            headers
+
+    Service:
+        Concerned with:
+            Business rules
+            Business operations
+            Application logic
+
+    Example:
+    Controller
+        const createOrder = async (req, res, next) => {
+            try {
+                const order = await orderService.createOrder(
+                    req.user.id,
+                    req.body
+                );
+
+                res.status(201).json(order);
+            } catch (err) {
+                next(err);
+            }
+        };
+
+    Service:
+        const createOrder = async (userId, data) => {
+            // Check stock
+            // Calculate total
+            // Apply business rules
+            // Create order
+        };
+
+
+11. Should the service use req and res?
+    Generally no.
+
+    Avoid:
+        const createUser = async (req, res) => {
+            // business logic
+        };
+
+    Instead:
+        const createUser = async (userData) => {
+            // business logic
+        };
+
+    This keeps the service independent of Express.
+
+
+12. Middleware placement
+    A typical request pipeline:
+        Request
+        ↓
+        Logger
+        ↓
+        CORS
+        ↓
+        Body Parser
+        ↓
+        Authentication
+        ↓
+        Authorization
+        ↓
+        Validation
+        ↓
+        Controller
+        ↓
+        Service
+        ↓
+        Database
+
+    Not every application needs every middleware, and exact ordering depends on the middleware's purpose.
+
+
+13. Error handling
+    Don't repeat this everywhere:
+        try {
+        ...
+        } catch (err) {
+        res.status(500).json(...);
+        }
+
+    You can centralize error handling.
+
+    Controller:
+        const createUser = async (req, res, next) => {
+            try {
+                const user = await userService.createUser(req.body);
+
+                res.status(201).json(user);
+            } catch (error) {
+                next(error);
+            }
+        };
+
+    Error middleware:
+        app.use((err, req, res, next) => {
+            console.error(err);
+
+            res.status(500).json({
+                message: "Internal Server Error"
+            });
+        });
+
+    Remember:
+        Error middleware must have four parameters.
+        (err, req, res, next)
+
+    And it should generally be registered after your routes.
+
+
+14. Don't over-engineer
+    You don't always need:
+        route
+        controller
+        service
+        repository
+        factory
+        adapter
+        facade
+        strategy
+        ...
+
+    for a tiny application.
+
+    Architecture should match complexity.
+
+    For a small project:
+        routes → controller → database
+
+    may be enough.
+
+    For a larger system:
+        routes
+        ↓
+        controllers
+        ↓
+        services
+        ↓
+        repositories
+        ↓
+        database
+
+    can provide useful separation.
+
+    Interview answer
+        "I prefer separation of concerns, but I don't introduce abstractions purely for the sake of architecture. The structure should reflect the application's complexity and testing requirements."
+
+
+15. A realistic structure
+    For a larger application:
+        src/
+        │
+        ├── config/
+        │   └── database.js
+        │
+        ├── routes/
+        │   ├── user.routes.js
+        │   └── order.routes.js
+        │
+        ├── controllers/
+        │   ├── user.controller.js
+        │   └── order.controller.js
+        │
+        ├── services/
+        │   ├── user.service.js
+        │   └── order.service.js
+        │
+        ├── repositories/
+        │   ├── user.repository.js
+        │   └── order.repository.js
+        │
+        ├── models/
+        │   ├── user.model.js
+        │   └── order.model.js
+        │
+        ├── middlewares/
+        │   ├── auth.middleware.js
+        │   ├── validation.middleware.js
+        │   └── error.middleware.js
+        │
+        ├── utils/
+        │   └── logger.js
+        │
+        ├── app.js
+        └── server.js
+
+
+16. app.js vs server.js
+    A good practice is separating Express configuration from server startup.
+    app.js:
+        const express = require("express");
+
+        const app = express();
+
+        app.use(express.json());
+
+        app.use("/api/users", userRoutes);
+
+        module.exports = app;
+
+    server.js:
+        const app = require("./app");
+
+        const PORT = process.env.PORT || 3000;
+
+        app.listen(PORT, () => {
+            console.log(`Server running on ${PORT}`);
+        });
+
+    Why?
+        Because testing becomes easier:
+        app.js
+        ↓
+        Express application
+
+        server.js
+        ↓
+        Starts actual HTTP server
+
+    You can import app into tests without automatically opening a network port.
+
+
+17. Common interview scenario
+    Interviewer:
+        "Your controller has 300 lines of business logic. How would you improve it?"
+
+    Good answer:
+        "I'd keep the controller focused on HTTP concerns and move business logic into services. Database access can be isolated behind repositories or data-access modules. I'd also centralize error handling and validation where appropriate."
+
+
+18. Another scenario
+    "Where should database queries live?"
+        There isn't one universal rule, but in a layered architecture:
+            Controller
+                ↓
+            Service
+                ↓
+            Repository / Data Access
+                ↓
+            Database
+
+    The repository/data-access layer owns persistence operations, while the service owns business rules.
+
+
+19. Interview questions
+    Q1. Controller vs Service?
+        Controller = HTTP layer.
+        Service = business logic.
+
+    Q2. Why separate routes and controllers?
+        To keep routing configuration separate from request-handling logic.
+
+    Q3. Why use a repository?
+        To isolate data-access logic from business logic and make persistence concerns easier to test/change.
+
+    Q4. Should service receive req/res?
+        Generally no. Pass domain/application data instead.
+
+    Q5. Why separate app.js and server.js?
+        Better separation and easier testing.
+
+    Q6. Where should error handling happen?
+        Use centralized error middleware for consistent handling, while services/controllers can throw or forward meaningful errors.
+
+    Q7. Is repository pattern mandatory?
+        No. It's an architectural choice. For simple applications it may add unnecessary abstraction.
+
+
+
+Interview-ready architecture answer
+    If an interviewer asks:
+        "Explain the architecture of your Node.js application."
+
+    You can say:
+        "I typically follow a layered architecture. Routes define endpoints and middleware handles cross-cutting concerns such as authentication and validation. Controllers handle HTTP-specific concerns and delegate business logic to services. Services contain business rules and call the repository or data-access layer for database operations. Errors are handled centrally through error middleware. This keeps responsibilities separated and makes the application easier to test and maintain."
+
+
+Remember
+            ROUTE
+            "What endpoint?"
+
+                ↓
+
+            MIDDLEWARE
+            "Should this request proceed?"
+
+                ↓
+
+            CONTROLLER
+            "How do I handle HTTP?"
+
+                ↓
+
+            SERVICE
+            "What is the business rule?"
+
+                ↓
+
+            REPOSITORY
+            "How do I access data?"
+
+                ↓
+
+            DATABASE
+            "Where is the data?"
