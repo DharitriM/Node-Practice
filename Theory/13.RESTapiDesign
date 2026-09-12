@@ -1,0 +1,510 @@
+REST API Design
+
+1. What is REST?
+    REST = Representational State Transfer.
+    A REST API exposes resources through URLs and uses standard HTTP methods to operate on those resources.
+
+    Example resource:
+    users:
+        API:
+            GET    /users
+            GET    /users/123
+            POST   /users
+            PUT    /users/123
+            PATCH  /users/123
+            DELETE /users/123
+
+    Think:
+        Resource = User
+                ↓
+        HTTP method + URL
+                ↓
+        Operation
+
+
+2. HTTP Methods
+    GET — retrieve
+        GET /users
+        Get all users.
+
+    GET /users/123
+        Get one user.
+
+    POST — create
+        POST /users
+        {
+            "name": "John",
+            "email": "john@example.com"
+        }
+
+        Creates a new user.
+
+    PUT — replace
+        PUT /users/123
+        Typically means replacing the resource representation.
+
+        {
+            "name": "John",
+            "email": "new@example.com",
+            "age": 30
+        }
+
+        Think:
+            PUT = replace/update the whole resource
+
+    PATCH — partial update
+        PATCH /users/123
+        {
+            "age": 31
+        }
+
+        Only modifies the specified fields.
+
+        Think:
+            PATCH = partial update
+
+    DELETE
+        DELETE /users/123
+        Deletes the resource.
+
+
+3. PUT vs PATCH — Interview Favorite
+    PUT
+        Existing:
+            {
+            name: "John",
+            age: 30
+            }
+
+        PUT:
+            {
+            name: "Alex",
+            age: 25
+            }
+    Conceptually replaces the representation.
+    
+    PATCH
+        PATCH:
+            {
+            age: 25
+            }
+    Only updates age.
+
+    Interview answer:
+        "PUT is generally used to replace a resource representation, while PATCH is used for partial modifications."
+
+    Don't claim that every framework strictly enforces replacement semantics; HTTP semantics and application implementation are separate.
+
+
+4. HTTP Status Codes
+    2xx — Success
+        200 OK
+        Successful request.
+
+    GET /users/123
+        → 200
+            201 Created
+        Resource successfully created.
+
+    POST /users
+        → 201
+            204 No Content
+        Successful request with no response body.
+
+    Common example:
+        DELETE /users/123
+        → 204   
+
+
+5. 4xx — Client errors
+    400 Bad Request
+        Invalid request.
+        {
+            "email": "not-an-email"
+        }
+
+    401 Unauthorized
+        Authentication is missing/invalid.
+        Example:
+            No valid JWT
+        Important distinction:
+            401 = authentication problem
+
+    403 Forbidden
+        User is authenticated but doesn't have permission.
+            Authenticated admin → allowed
+            Authenticated normal user → forbidden
+            403 = authorization problem
+
+    404 Not Found
+        Resource doesn't exist.
+        GET /users/999999
+
+    409 Conflict
+        Request conflicts with current resource state.
+        Example:
+            POST /users
+
+        with an email that must be unique and already exists.
+
+    422 Unprocessable Content
+        Request is syntactically valid but fails semantic validation.
+        For example:
+            {
+                "age": -10
+            }
+
+    Whether your API uses 400 or 422 for validation failures is a design choice; be consistent.
+
+
+6. 5xx — Server errors
+    500 Internal Server Error
+        Unexpected server-side failure.
+
+    502 Bad Gateway
+        A gateway/proxy received an invalid response from an upstream service.
+
+    503 Service Unavailable
+        Service temporarily unavailable.
+
+
+7. REST URL design
+    Bad:
+        GET /getUsers
+        POST /createUser
+        POST /deleteUser
+
+    Better:
+        GET    /users
+        POST   /users
+        DELETE /users/123
+
+    The HTTP method should communicate the operation.
+
+
+8. Nested resources
+    Suppose users have orders.
+    You could have:
+        GET /users/123/orders
+        Get orders belonging to user 123.
+    And:
+        GET /users/123/orders/456
+        Get order 456 belonging to user 123.
+
+    But don't over-nest URLs unnecessarily.
+    Avoid something like:
+        /users/123/orders/456/items/789/reviews/111/comments/222
+
+    That becomes difficult to maintain.
+
+
+9. Query parameters
+    Query parameters are useful for:
+        filtering
+        sorting
+        pagination
+        searching
+
+    Example:
+        GET /users?role=admin
+            Filtering.
+
+        GET /users?sort=name
+            Sorting.
+
+        GET /users?page=2&limit=20
+            Pagination.
+
+
+10. Pagination
+    Never blindly return:
+        GET /users
+        with millions of records.
+
+    Basic pagination:
+        GET /users?page=2&limit=20
+
+    Response:
+        {
+            "data": [...],
+            "page": 2,
+            "limit": 20,
+            "total": 500
+        }
+
+    For very large datasets, cursor-based pagination can be preferable.
+    Example:
+        GET /users?limit=20&cursor=abc123
+
+
+11. Offset vs Cursor Pagination
+    Offset
+        ?page=10&limit=20
+
+        Database conceptually does:
+            skip 180
+            take 20
+
+        Simple, but deep offsets can become inefficient and results can shift when data changes.
+    
+    Cursor
+        ?limit=20&cursor=abc123
+        The cursor represents a position in the dataset.
+
+        Often better for:
+            large datasets
+            infinite scrolling
+            frequently changing data
+            Interview answer
+
+    "Offset pagination is simpler and works well for many use cases, while cursor-based pagination is generally better for large or frequently changing datasets because it avoids increasingly expensive offsets and provides more stable traversal."
+
+
+12. Filtering + Sorting + Pagination
+    A realistic API:
+        GET /products
+            ?category=mobile
+            &minPrice=10000
+            &maxPrice=50000
+            &sort=price
+            &page=2
+            &limit=20
+
+    This is much more realistic than just knowing:
+        GET /users
+
+
+13. API versioning
+    Suppose you release:
+        /api/v1/users
+
+    Later you introduce breaking changes:
+        /api/v2/users
+
+    Versioning helps clients migrate without immediately breaking existing consumers.
+    Other approaches exist, such as header/media-type versioning, 
+    but URL versioning is common and easy to understand.
+
+
+14. Idempotency
+    An operation is idempotent if making the same request multiple times has the same intended effect as making it once.
+    Examples under HTTP semantics:
+        GET    → idempotent
+        PUT    → idempotent
+        DELETE → idempotent
+
+    POST is generally not idempotent.
+    Example:
+        POST /orders
+            Sending it twice could create:
+                Order #101
+                Order #102
+
+
+15. Idempotency keys
+    For critical operations such as payments/orders, you may use:
+        Idempotency-Key: abc123
+
+    Client sends:
+        POST /payments
+        Idempotency-Key: abc123
+
+    If the request is accidentally retried, the server can recognize the same operation rather than processing it as a new payment.
+    Conceptually:
+        Request
+        ↓
+        Idempotency Key
+        ↓
+        Already processed?
+        ┌───────┴───────┐
+        Yes             No
+        ↓                ↓
+        Return result   Process
+
+    This is a very good real-world interview topic.
+
+
+16. Request validation
+    Never trust:
+        req.body
+        req.params
+        req.query
+    Validate them.
+
+    Example using a validation library:
+        const userSchema = {
+            name: "required",
+            email: "valid email"
+        };
+
+    In real applications, libraries such as:
+        Zod
+        Joi
+        Yup
+        express-validator
+    can be used.
+
+    Validation should happen before business logic.
+        Request
+        ↓
+        Validation
+        ↓
+        Authentication
+        ↓
+        Authorization
+        ↓
+        Controller
+        ↓
+        Service
+        ↓
+        Database
+
+    Exact middleware ordering depends on your requirements, but the principle is to reject invalid/untrusted input early.
+
+
+17. Consistent response structure
+    Avoid random response shapes:
+        {
+            "name": "John"
+        }
+
+    then another endpoint:
+        {
+            "result": {
+                "name": "Alex"
+            }
+        }
+
+    A consistent API contract is easier for frontend/client developers.
+    For example:
+        {
+            "data": {
+                "id": 123,
+                "name": "John"
+            }
+        }
+
+    Error:
+        {
+            "error": {
+                "code": "USER_NOT_FOUND",
+                "message": "User not found"
+            }
+        }
+
+    The exact structure is a team/API design decision; consistency matters more than one universal format.
+
+
+18. REST is stateless
+    This is one of the fundamental REST principles.
+    Each request should contain the information necessary for the server to process it.
+
+    For example:
+        GET /profile
+            Authorization: Bearer <token>
+
+    The server shouldn't depend on hidden state from a previous request to understand this request.
+
+    Interview answer
+        "Statelessness means each request contains the context required to process it. The server doesn't rely on application session state from previous requests as part of the REST interaction."
+
+    Note: authentication systems can still use server-side session storage; "stateless REST" is a broader architectural constraint, not a claim that every possible authentication implementation must be token-based.
+
+
+19. Common REST interview scenario
+    Interviewer:
+        "Design APIs for an e-commerce application."
+
+    A reasonable starting point:
+        Users
+            GET    /api/v1/users
+            GET    /api/v1/users/:id
+            POST   /api/v1/users
+            PATCH  /api/v1/users/:id
+            DELETE /api/v1/users/:id
+
+        Products
+            GET    /api/v1/products
+            GET    /api/v1/products/:id
+            POST   /api/v1/products
+            PATCH  /api/v1/products/:id
+            DELETE /api/v1/products/:id
+
+        Orders
+            GET    /api/v1/orders
+            GET    /api/v1/orders/:id
+            POST   /api/v1/orders
+            PATCH  /api/v1/orders/:id
+
+    Then discuss:
+        Authentication
+        Authorization
+        Validation
+        Pagination
+        Filtering
+        Error handling
+        Idempotency
+        Rate limiting
+        Caching
+        Database transactions
+
+    That's how you move from "I know REST" to "I can design APIs."
+
+
+20. Top interview questions
+    Q: PUT vs PATCH?
+        PUT generally replaces the resource representation; PATCH partially modifies it.
+
+    Q: 401 vs 403?
+        401 → authentication missing/invalid.
+        403 → authenticated but not authorized.
+
+    Q: 200 vs 201?
+        200 → successful request.
+        201 → resource successfully created.
+
+    Q: 204?
+        Success with no response body.
+
+    Q: What is idempotency?
+        Repeated identical requests produce the same intended resource state/effect.
+
+    Q: Why pagination?
+        To avoid returning huge datasets and reduce memory, database, network, and response costs.
+
+    Q: Offset vs cursor pagination?
+        Offset is simpler; cursor generally scales better for large/changing datasets.
+
+    Q: What does stateless mean?
+        Each request carries the information required to process it without depending on previous request context stored as part of the REST interaction.
+
+    Q: How do you design a good REST API?
+        Use resource-oriented URLs, appropriate HTTP methods/status codes, consistent response structures, validation, authentication/authorization, pagination, filtering, versioning where needed, and proper error handling.
+
+
+
+
+The mental model:
+                REST API
+                   │
+          ┌────────┴────────┐
+          ↓                 ↓
+       Resource          HTTP Method
+          │                 │
+       /users             GET
+       /orders            POST
+       /products          PATCH
+                         DELETE
+                           │
+                           ↓
+                    Status Code
+                           │
+               ┌───────────┴──────────┐
+               ↓                      ↓
+             Success                 Error
+             2xx                     4xx/5xx
+
+
+
+For interviews, remember these 10:
+GET → POST → PUT → PATCH → DELETE → 200 → 201 → 204 → 401 vs 403 → idempotency
