@@ -1,0 +1,300 @@
+File System & Practical File Handling
+
+1. Reading a file
+    Async — preferred
+        const fs = require("fs/promises");
+        async function readFile() {
+            try {
+                const data = await fs.readFile("./data.txt", "utf8");
+                console.log(data);
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+    Sync — blocks execution
+        const data = fs.readFileSync("./data.txt", "utf8");
+
+    Interview: Why avoid sync APIs in request handlers?
+        Because they block the Node.js event loop and prevent the server from processing other JavaScript work during the operation.
+
+
+2. Writing a file
+    await fs.writeFile("./data.txt", "Hello Node.js");
+
+    If the file doesn't exist, it is created.
+    If it exists, its content is normally overwritten.
+
+
+3. Append to a file
+    await fs.appendFile("./data.txt", "\nNew line");
+
+    Useful for simple logs or adding content without replacing existing content.
+
+
+4. Delete a file
+    await fs.unlink("./data.txt");
+
+
+5. Create a directory
+    await fs.mkdir("./uploads");
+
+    If parent directories might not exist:
+        await fs.mkdir("./storage/uploads", {
+            recursive: true
+        });
+
+    "recursive: true" creates missing parent directories as needed.
+
+
+6. Read directory contents
+    const files = await fs.readdir("./uploads");
+    console.log(files);
+
+    You get something like:
+        [
+            "photo.jpg",
+            "resume.pdf",
+            "document.txt"
+        ]
+
+
+7. Check file information
+    Use stat():
+        const info = await fs.stat("./photo.jpg");
+        console.log(info.size);
+        console.log(info.isFile());
+        console.log(info.isDirectory());
+
+    Useful when you need to check:
+        file size
+        whether it's a file/directory
+        timestamps
+        permissions/metadata
+
+
+8. JSON file handling
+    A common beginner backend pattern is storing data in JSON.
+    users.json
+        [
+            {
+                "id": 1,
+                "name": "John"
+            }
+        ]
+
+    Read it:
+        const data = await fs.readFile("./users.json", "utf8");
+        const users = JSON.parse(data);
+
+    Modify:
+        users.push({
+            id: 2,
+            name: "Alex"
+        });
+
+    Write:
+        await fs.writeFile(
+            "./users.json",
+            JSON.stringify(users, null, 2)
+        );
+
+    But important:
+        Don't use a JSON file as your primary database for a real production application with concurrent requests.
+
+    Problems include:
+        concurrency issues
+        poor query performance
+        entire file may need to be read/written
+        difficult scaling
+        potential data corruption if poorly managed
+
+    For production, use a proper database.
+
+
+9. File uploads — important scenario
+    Suppose:
+        POST /upload
+    and the user uploads a 500 MB video.
+    You should think about:
+        Client
+        ↓
+        HTTP stream
+        ↓
+        Upload processing
+        ↓
+        Write stream
+        ↓
+        Storage
+
+    For large files, avoid unnecessarily doing:
+        const file = await fs.readFile(...);
+
+    because you may load a huge amount of data into memory.
+    Use streaming where appropriate.
+
+
+10. File path handling
+    Never rely on manually concatenating paths:
+        const file = __dirname + "/uploads/" + filename;
+
+    Prefer:
+        const path = require("path");
+
+        const file = path.join(
+            __dirname,
+            "uploads",
+            filename
+        );
+
+    This is safer and platform-independent.
+
+
+11. Security issue — path traversal
+    Imagine an API:
+        GET /download?file=report.pdf
+
+    A malicious user might attempt:
+        ../../../../etc/passwd
+
+    If you blindly construct a path:
+        path.join(__dirname, "files", req.query.file);
+
+    you can potentially expose files outside the intended directory.
+    This is called path traversal / directory traversal.
+
+    "I would validate the requested filename, restrict access to a known directory, resolve the final path, and verify that it remains within the allowed base directory. I would also avoid trusting user-supplied paths directly."
+
+
+12. fs vs fs/promises
+    Traditional:
+        const fs = require("fs");
+        fs.readFile(...);
+
+    Promise API:
+        const fs = require("fs/promises");
+        await fs.readFile(...);
+
+    For modern async/await-based Node applications, fs/promises is often cleaner.
+
+
+13. readFile vs createReadStream
+    readFile:
+        const data = await fs.readFile("large.mp4");
+
+    Conceptually:
+        Entire file
+            ↓
+        Memory
+            ↓
+        Process
+        
+    createReadStream:
+        const stream = fs.createReadStream("large.mp4");
+
+    Conceptually:
+        File
+        ↓
+        Chunk
+        ↓
+        Process
+        ↓
+        Chunk
+        ↓
+        Process
+        Interview answer
+
+    "For small files, readFile can be perfectly fine. For large files or continuous data, I'd prefer streams because they process data incrementally and reduce memory pressure."
+
+
+14. Handling errors
+    Don't do this:
+        const data = await fs.readFile("missing.txt");
+
+    without considering failures.
+    Use:
+        try {
+            const data = await fs.readFile("missing.txt", "utf8");
+        } catch (error) {
+            console.error(error);
+        }
+
+    Common errors include:
+        ENOENT → file/directory doesn't exist
+        EACCES → permission denied
+        EISDIR → expected a file but encountered directory
+
+
+15. Production scenario
+    Interviewer:
+        "Your API becomes slow when generating a large report. You discover you're using readFileSync and writeFileSync. What would you do?"
+
+    Strong answer:
+        "I'd replace synchronous filesystem operations with asynchronous APIs or streams depending on the workload. If the report is large, I'd stream the data rather than buffering the entire result in memory. I'd also profile the endpoint to verify whether filesystem I/O is actually the bottleneck."
+
+
+16. Another scenario
+    Interviewer:
+        "You need to serve a 2 GB video to a client. What would you use?"
+
+    Answer:
+        "fs.createReadStream() and pipe the stream to the HTTP response. For production video delivery, I'd also consider object storage/CDN and HTTP range requests rather than having the Node application serve large media files directly."
+
+
+17. Key interview questions
+    readFile vs readFileSync:   
+        Async vs synchronous/blocking filesystem operation.
+
+    readFile vs createReadStream:
+        readFile loads the complete file into memory; createReadStream processes it incrementally.
+
+    How do you handle large files?
+        Use streams and avoid buffering the entire file in memory.
+
+    How do you safely handle user-provided filenames?
+        Validate input, restrict access to an allowed directory, normalize/resolve paths, and prevent path traversal.
+
+    Should files be stored in the Node server's local filesystem?
+        For temporary/local processing, potentially yes. For persistent production storage, object storage such as S3-compatible storage is generally preferable, especially with multiple application instances.
+
+
+
+fs/promises
+   ↓
+Modern async file operations
+
+readFile
+   ↓
+Entire file → memory
+
+createReadStream
+   ↓
+File → chunks
+
+writeFile
+   ↓
+Overwrite/create
+
+appendFile
+   ↓
+Add content
+
+unlink
+   ↓
+Delete
+
+mkdir
+   ↓
+Create directory
+
+readdir
+   ↓
+List directory
+
+stat
+   ↓
+File metadata
+
+path
+   ↓
+Safe path construction
