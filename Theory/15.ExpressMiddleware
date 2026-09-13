@@ -1,0 +1,580 @@
+Express Middleware
+
+Request
+   ↓
+Middleware 1
+   ↓
+Middleware 2
+   ↓
+Middleware 3
+   ↓
+Controller
+   ↓
+Response
+
+
+A middleware function can:
+    Execute code
+    Modify req/res
+    End the request
+    Pass control using next()
+
+
+
+1. Basic middleware
+    app.use((req, res, next) => {
+        console.log("Middleware executed");
+        next();
+    });
+
+    next() means:
+        This middleware has finished; continue to the next matching middleware/route."
+
+
+2. What happens if you don't call next()?
+    app.use((req, res, next) => {
+        console.log("Hello");
+    });
+
+    There is no:
+        next();
+
+    and no response:
+        res.json(...)
+
+    So the request can remain pending.
+    This is a very common interview trap.
+
+
+3. Middleware can terminate a request
+    Middleware doesn't always need to call next().
+
+    Example authentication:
+        const authMiddleware = (req, res, next) => {
+            const token = req.headers.authorization;
+
+            if (!token) {
+                return res.status(401).json({
+                    message: "Authentication required"
+                });
+            }
+
+            next();
+        };
+
+    Flow:
+        Request
+        ↓
+        Auth Middleware
+        ↓
+        Token?
+        ┌─┴─────────┐
+        No          Yes
+        ↓            ↓
+        401         next()
+                ↓
+            Controller
+
+    Once the middleware sends the response, it should return so execution doesn't accidentally continue.
+
+
+4. Middleware can modify req
+    Very common pattern:
+        const authMiddleware = (req, res, next) => {
+            const user = verifyToken(req.headers.authorization);
+
+            req.user = user;
+
+            next();
+        };
+
+    Then controller:
+        const getProfile = (req, res) => {
+            console.log(req.user);
+        };
+
+    So middleware can enrich the request:
+        Request
+        ↓
+        Authentication
+        ↓
+        req.user = decodedUser
+        ↓
+        Controller
+
+
+5. Types of middleware
+    Application-level:
+        app.use(logger);
+        Applies broadly to the application depending on path/order.
+
+    Router-level:
+        router.use(authMiddleware);
+        Applies to routes in that router.
+
+    Built-in:
+        Express provides middleware such as:
+        app.use(express.json());
+    
+    Third-party:
+        Examples:
+            cors
+            helmet
+            morgan
+
+    Error-handling middleware:
+        app.use((err, req, res, next) => {
+            ...
+        });
+
+
+6. Middleware order matters
+    Consider:
+        app.use((req, res, next) => {
+            console.log("A");
+            next();
+        });
+
+        app.use((req, res, next) => {
+            console.log("B");
+            next();
+        });
+
+        app.get("/", (req, res) => {
+            console.log("C");
+            res.send("Hello");
+        });
+
+    Output:
+        A
+        B
+        C
+
+    Express processes matching middleware in registration order.
+
+
+7. Order can completely change behavior
+    Suppose:
+        app.use("/admin", authMiddleware);
+        app.get("/admin/users", getUsers);
+
+    Authentication runs before the route.
+
+    But if you register:
+        app.get("/admin/users", getUsers);
+        app.use("/admin", authMiddleware);
+
+    the route may already have handled the request, so the later middleware won't protect it.
+
+    Interview answer
+        Express middleware is order-dependent. Middleware should be registered in the correct sequence because Express executes matching middleware in the order it was added.
+
+
+8. app.use() vs route middleware
+    Global/application middleware
+        app.use(express.json());
+    Specific route
+        app.get(
+            "/profile",
+            authMiddleware,
+            getProfile
+        );
+
+    Only /profile uses that authentication middleware.
+
+
+9. Multiple middleware
+    You can have:
+        app.post(
+            "/users",
+            authMiddleware,
+            validateUser,
+            createUser
+        );
+
+    Execution:
+        Request
+        ↓
+        authMiddleware
+        ↓
+        validateUser
+        ↓
+        createUser
+
+    Each middleware calls:
+        next();
+    to continue.
+
+
+10. Authentication vs Authorization middleware
+    Authentication:
+        Who are you?
+            JWT → verify → req.user
+
+    Authorization
+        Are you allowed to perform this action?
+        Example:
+            const requireAdmin = (req, res, next) => {
+                if (req.user.role !== "admin") {
+                    return res.status(403).json({
+                        message: "Forbidden"
+                    });
+                }
+
+                next();
+            };
+
+    Flow:
+        Request
+        ↓
+        Authentication
+        ↓
+        Who is user?
+        ↓
+        Authorization
+        ↓
+        Does user have permission?
+        ↓
+        Controller
+
+
+11. Async middleware
+    Suppose:
+        const authMiddleware = async (req, res, next) => {
+            try {
+                const user = await verifyUser(req);
+
+                req.user = user;
+
+                next();
+            } catch (error) {
+                next(error);
+            }
+        };
+
+    The important part is:
+        catch
+        ↓
+        next(error)
+
+
+12. next() vs next(error)
+    Normal flow
+        next();
+
+    means:
+        Continue normally.
+
+    Error flow
+        next(error);
+
+    means:
+        Skip normal middleware/route handlers and pass the error to error-handling middleware.
+
+    Example:
+        app.use((err, req, res, next) => {
+            res.status(500).json({
+                message: err.message
+            });
+        });
+
+
+13. Error middleware
+    Normal middleware:
+        (req, res, next)
+
+    Error middleware:
+        (err, req, res, next)
+
+    That four-argument signature is how Express recognizes error-handling middleware.
+
+    Example:
+        app.use((err, req, res, next) => {
+            console.error(err);
+
+            res.status(500).json({
+                message: "Internal Server Error"
+            });
+        });
+
+    Register it after your routes/middleware that can pass errors to it.
+
+
+14. Authentication middleware example
+    A realistic pattern:
+        const jwt = require("jsonwebtoken");
+
+        function auth(req, res, next) {
+            try {
+                const header = req.headers.authorization;
+
+                if (!header?.startsWith("Bearer ")) {
+                    return res.status(401).json({
+                        message: "Missing token"
+                    });
+                }
+
+                const token = header.split(" ")[1];
+
+                const user = jwt.verify(
+                    token,
+                    process.env.JWT_SECRET
+                );
+
+                req.user = user;
+
+                next();
+            } catch (error) {
+                return res.status(401).json({
+                    message: "Invalid token"
+                });
+            }
+        }
+
+    Then:
+        router.get(
+            "/profile",
+            auth,
+            userController.getProfile
+        );
+
+    We'll cover JWT properly in the authentication section later.
+
+
+15. Middleware for validation
+Example:
+    function validateUser(req, res, next) {
+        const { name, email } = req.body;
+
+        if (!name || !email) {
+            return res.status(400).json({
+                message: "Name and email are required"
+            });
+        }
+
+        next();
+    }
+
+Flow:
+    POST /users
+        ↓
+    Auth
+        ↓
+    Validation
+        ↓
+    Controller
+
+
+16. Middleware for logging
+    Simple example:
+        const logger = (req, res, next) => {
+            console.log(
+                req.method,
+                req.originalUrl
+            );
+
+            next();
+        };
+
+    Production applications typically use a structured logging solution rather than raw console.log() everywhere.
+
+
+17. Middleware vs Controller
+    Middleware:
+        Usually handles cross-cutting concerns:
+        Authentication
+        Authorization
+        Validation
+        Logging
+        Rate limiting
+        CORS
+        Request parsing
+
+    Controller:
+        Handles the endpoint's actual HTTP operation:
+            Get user
+            Create order
+            Update profile
+
+
+18. Common interview scenario
+    Interviewer:
+        "You have 10 APIs and all require authentication. How would you implement it?"
+
+    You could use:
+        router.use(authMiddleware);
+
+    Then:
+        /users
+        /orders
+        /products
+        /payments
+    all pass through authentication.
+
+    If only some routes require auth:
+        router.get("/public", publicController);
+
+        router.get(
+            "/profile",
+            authMiddleware,
+            profileController
+        );
+
+
+19. Another common question
+    "What happens when next(error) is called?"
+    Answer:
+        Express switches to error-handling middleware and skips regular middleware/route handlers in the remaining chain.
+
+    Conceptually:
+        Middleware A
+            ↓
+        Middleware B
+            ↓
+        next(error)
+            ↓
+        Error Middleware
+
+
+20. next() does NOT mean "call the next line"
+    app.use((req, res, next) => {
+        console.log("A");
+        next();
+        console.log("B");
+    });
+
+    next() transfers control forward, but after downstream middleware completes, execution can return to the current function.
+
+    So you can see:
+        A
+        [downstream middleware]
+        B
+
+    It's better to think of middleware as a call chain, not simply a list of lines.
+
+
+21. Classic interview trap
+    What happens here?
+        app.use((req, res, next) => {
+            console.log("Middleware");
+            next();
+            res.send("Hello");
+        });
+
+        app.get("/", (req, res) => {
+            res.send("Route");
+        });
+
+    Both the middleware and route attempt to send a response.
+
+    That can produce:
+        Error: Cannot set headers after they are sent
+
+    The lesson:
+        Once a downstream handler has handled the response, don't try to send another response from the upstream middleware.
+
+
+22. Best-practice request pipeline
+    A typical API might look like:
+        Request
+        ↓
+        CORS
+        ↓
+        Request ID / Logging
+        ↓
+        Body Parsing
+        ↓
+        Rate Limiting
+        ↓
+        Authentication
+        ↓
+        Authorization
+        ↓
+        Validation
+        ↓
+        Controller
+        ↓
+        Service
+        ↓
+        Database
+        ↓
+        Response
+        ↓
+        Error Handler
+
+    The exact order varies based on application requirements.
+
+
+Interview Questions You Must Know
+    1. What is middleware?
+        A function in the Express request-response pipeline that can execute logic, modify the request/response, terminate the request, or pass control using next().
+
+    2. What happens if next() isn't called?
+        If the middleware doesn't send a response, the request can remain hanging.
+
+    3. Can middleware send a response?
+        Yes.
+        return res.status(401).json(...);
+
+    4. What is next(error)?
+        It passes an error to Express's error-handling middleware.
+
+    5. What is error middleware?
+        (err, req, res, next)
+
+    6. Does middleware execute in parallel?
+        No. The middleware chain proceeds according to the registered order and how each middleware calls next()/handles the response.
+
+    7. Can middleware modify req?
+        Yes.
+        req.user = user;
+
+    8. Why is middleware order important?
+        Because Express processes matching middleware in registration order.
+
+    9. Authentication vs authorization?
+        Authentication: Who are you?
+        Authorization: What are you allowed to do?
+
+    10. Is middleware asynchronous?
+        Middleware can be synchronous or asynchronous. Being middleware does not inherently make it asynchronous.
+
+
+
+The interview mental model
+                REQUEST
+                   ↓
+            ┌─────────────┐
+            │ Middleware  │
+            └──────┬──────┘
+                   │
+             next()│
+                   ↓
+            ┌─────────────┐
+            │ Middleware  │
+            └──────┬──────┘
+                   │
+             next()│
+                   ↓
+            ┌─────────────┐
+            │ Controller  │
+            └──────┬──────┘
+                   │
+                   ↓
+               RESPONSE
+
+
+        Error anywhere
+              ↓
+        next(error)
+              ↓
+       Error Middleware
+
+
+⭐ Remember these 6 points
+    Middleware = request pipeline
+    next() = continue
+    next(error) = error flow
+    No next() + no response = request can hang
+    Order matters
+    Middleware is not inherently asynchronous
