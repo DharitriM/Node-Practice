@@ -1,0 +1,555 @@
+Express Error Handling
+
+1. Types of errors
+    At a high level:
+        Errors
+        ├── Validation errors
+        ├── Authentication errors
+        ├── Authorization errors
+        ├── Not found errors
+        ├── Database errors
+        ├── External API errors
+        └── Unexpected/programming errors
+
+    Example:
+        throw new Error("User not found");
+
+
+2. Basic Express error middleware
+    Express recognizes error-handling middleware by its four arguments:
+
+    app.use((err, req, res, next) => {
+        console.error(err);
+
+        res.status(500).json({
+            message: "Internal Server Error"
+        });
+    });
+
+    The signature is:
+        (err, req, res, next)
+
+
+3. next(error)
+    Suppose a controller encounters an error:
+        app.get("/users", async (req, res, next) => {
+            try {
+                const users = await getUsers();
+
+                res.json(users);
+            } catch (error) {
+                next(error);
+            }
+        });
+
+    next(error) tells Express:
+        "Something went wrong. Send this into the error-handling pipeline."
+
+    Flow:
+        Request
+        ↓
+        Controller
+        ↓
+        Error
+        ↓
+        next(error)
+        ↓
+        Error Middleware
+        ↓
+        Response
+
+
+4. Why centralized error handling?
+    Bad approach:
+        app.get("/users", async (req, res) => {
+            try {
+                ...
+            } catch (err) {
+                res.status(500).json({
+                    message: err.message
+                });
+            }
+        });
+
+        app.get("/orders", async (req, res) => {
+            try {
+                ...
+            } catch (err) {
+                res.status(500).json({
+                    message: err.message
+                });
+            }
+        });
+
+    You're repeating error-handling logic.
+        Better:
+            Controller
+            ↓
+            next(error)
+            ↓
+            Central Error Handler
+
+    Benefits:
+        consistent responses
+        less duplication
+        easier logging
+        easier monitoring
+        centralized status-code mapping
+
+
+5. Custom error class
+    Instead of throwing generic Error everywhere, create an application error.
+
+    class AppError extends Error {
+        constructor(message, statusCode) {
+            super(message);
+
+            this.statusCode = statusCode;
+            this.isOperational = true;
+        }
+    }
+
+    Then:
+        throw new AppError(
+            "User not found",
+            404
+        );
+
+    Central handler:
+        app.use((err, req, res, next) => {
+            const statusCode = err.statusCode || 500;
+
+            res.status(statusCode).json({
+                message: err.message
+            });
+        });
+
+    Now:
+        User not found
+            ↓
+        AppError(404)
+            ↓
+        Error middleware
+            ↓
+        404 response
+
+
+6. Operational vs programming errors
+    Operational errors
+        Expected failures that can happen during normal operation.
+        Examples:
+            User doesn't exist
+            Invalid input
+            Database unavailable
+            External API timeout
+            Invalid token
+            File doesn't exist
+
+        These can usually be handled gracefully.
+
+    Programming errors
+        Bugs in your code.
+        Examples:
+            const user = undefined;
+            console.log(user.name);
+
+        or:
+            someFunctionThatDoesNotExist();
+
+        These indicate a code defect and should generally be fixed rather than treated as normal client errors.
+
+    Interview answer
+        Operational errors are expected runtime failures that the application can usually handle gracefully, whereas programming errors indicate bugs in the application code and generally require investigation and fixing.
+
+
+7. Never expose internal errors to clients
+    Bad:
+        res.status(500).json({
+            message: err.stack
+        });
+
+    This could expose:
+        file paths
+        database details
+        internal implementation
+        stack traces
+        secrets
+
+    Instead:
+        res.status(500).json({
+            message: "Internal Server Error"
+        });
+
+    Log the detailed error internally.
+
+
+8. Environment-based error responses
+    During development:
+        console.error(err.stack);
+
+    You may want detailed debugging information.
+    Production:
+        Client
+        ↓
+        Generic error
+
+    while internally:
+        Logger
+        ↓
+        Full stack trace
+        ↓
+        Monitoring system
+
+    Never return sensitive internal details simply because they are useful for debugging.
+
+
+9. Mapping errors to status codes
+    Example:
+        class AppError extends Error {
+            constructor(message, statusCode) {
+                super(message);
+                this.statusCode = statusCode;
+            }
+        }
+
+    Then:
+        throw new AppError("User not found", 404);
+
+    or:
+        throw new AppError("Unauthorized", 401);
+
+    or:
+        throw new AppError("Forbidden", 403);
+
+    Central handler:
+        app.use((err, req, res, next) => {
+            const statusCode = err.statusCode || 500;
+
+            res.status(statusCode).json({
+                error: {
+                    message: err.message
+                }
+            });
+        });
+
+
+10. Async errors
+    A common issue is:
+        app.get("/users", async (req, res) => {
+            const users = await getUsers();
+
+            res.json(users);
+        });
+
+    What happens if:
+        getUsers()
+
+    rejects?
+        The exact handling depends on the Express version and how your application wraps async handlers. A robust approach is to ensure rejected promises reach your centralized error handler.
+
+    For example:
+        const asyncHandler = (handler) => {
+            return (req, res, next) => {
+                Promise
+                    .resolve(handler(req, res, next))
+                    .catch(next);
+            };
+        };
+
+    Use:
+        app.get(
+            "/users",
+            asyncHandler(async (req, res) => {
+                const users = await getUsers();
+
+                res.json(users);
+            })
+        );
+
+    Now:
+        Promise rejection
+            ↓
+        .catch(next)
+            ↓
+        Error middleware
+
+
+11. Async wrapper — interview favorite
+    Without wrapper:
+        try {
+            const user = await getUser();
+        } catch (err) {
+            next(err);
+        }
+
+    With wrapper:
+        app.get(
+            "/users/:id",
+            asyncHandler(async (req, res) => {
+                const user = await getUser(req.params.id);
+
+                res.json(user);
+            })
+        );
+
+    This reduces repetitive try/catch blocks.
+    But remember: modern Express versions have built-in Promise rejection handling, so whether you need a wrapper depends on the Express version and project conventions.
+
+
+12. 404 handling vs error handling
+    A route that doesn't exist isn't necessarily an application exception.
+
+    You can have a 404 middleware:
+        app.use((req, res) => {
+            res.status(404).json({
+                message: "Route not found"
+            });
+        });
+
+    Then your error middleware comes afterward:
+        app.use((err, req, res, next) => {
+            res.status(err.statusCode || 500).json({
+                message: err.message || "Internal Server Error"
+            });
+        });
+
+    Flow:
+        No matching route
+            ↓
+        404 middleware
+
+        Error occurs
+            ↓
+        next(error)
+            ↓
+        Error middleware
+
+
+13. Don't send two responses
+    Bad:
+        if (!user) {
+            res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        res.json(user);
+
+    After sending the 404, execution continues.
+    Better:
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        res.json(user);
+
+    This prevents:
+        Cannot set headers after they are sent
+
+
+14. Database error example
+    Suppose MongoDB throws a duplicate-key error.
+    Don't blindly return:
+        {
+            "message": "E11000 duplicate key error ..."
+        }
+
+    Instead, translate it into an API-level error:
+        Database error
+            ↓
+        Recognize duplicate key
+            ↓
+        409 Conflict
+            ↓
+        {
+            "message": "Email already exists"
+        }
+
+    Your API should expose a stable contract, not database implementation details.
+
+
+15. Error response design
+    A consistent structure is useful:
+        {
+            "error": {
+                "code": "USER_NOT_FOUND",
+                "message": "User not found"
+            }
+        }
+
+    For validation:
+        {
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": "Invalid request",
+                "details": [
+                    {
+                        "field": "email",
+                        "message": "Invalid email"
+                    }
+                ]
+            }
+        }
+
+    The exact response format is a project/API contract decision.
+
+
+16. Logging
+    Don't just do:
+        console.log(err);
+    in a serious production application.
+
+    A production system should ideally capture things such as:
+        timestamp
+        request ID
+        HTTP method
+        URL
+        status code
+        error type
+        stack trace
+        user/service context where appropriate
+
+    Use structured logging and monitoring tools.
+
+
+17. Error handling architecture
+    A clean structure:
+        Request
+        ↓
+        Route
+        ↓
+        Middleware
+        ↓
+        Controller
+        ↓
+        Service
+        ↓
+        Error thrown
+        ↓
+        next(error)
+        ↓
+        Central Error Middleware
+        ↓
+        Log error
+        ↓
+        Map to status code
+        ↓
+        Safe response
+
+
+18. Real-world example
+    class AppError extends Error {
+        constructor(message, statusCode, code) {
+            super(message);
+
+            this.statusCode = statusCode;
+            this.code = code;
+            this.isOperational = true;
+        }
+    }
+
+    Service:
+    async function getUser(id) {
+        const user = await User.findById(id);
+
+        if (!user) {
+            throw new AppError(
+                "User not found",
+                404,
+                "USER_NOT_FOUND"
+            );
+        }
+
+        return user;
+    }
+
+    Controller:
+    async function getUserController(req, res, next) {
+        try {
+            const user = await getUser(req.params.id);
+
+            res.json({
+                data: user
+            });
+        } catch (error) {
+            next(error);
+        }
+    }
+
+    Error middleware:
+    app.use((err, req, res, next) => {
+        console.error(err);
+
+        const statusCode = err.statusCode || 500;
+
+        res.status(statusCode).json({
+            error: {
+                code: err.code || "INTERNAL_ERROR",
+                message:
+                    err.isOperational
+                        ? err.message
+                        : "Internal Server Error"
+            }
+        });
+    });
+
+    This gives you:
+        Business error
+            ↓
+        AppError
+            ↓
+        Controller
+            ↓
+        next(error)
+            ↓
+        Central handler
+            ↓
+        Safe HTTP response
+
+
+Interview Questions
+    Q1. How does Express handle errors?
+        Errors can be passed using next(error) and are handled by middleware with the (err, req, res, next) signature.
+
+    Q2. Why centralized error handling?
+        To provide consistent responses, centralized logging, status-code mapping, and avoid duplicated error-handling logic.
+
+    Q3. What is an operational error?
+        An expected runtime failure that the application can generally handle gracefully, such as invalid input, missing resources, or an external service failure.
+
+    Q4. Should you expose err.stack to clients?
+        No. Stack traces and internal implementation details should generally be logged internally, not exposed in production responses.
+
+    Q5. How do you handle async errors?
+        Ensure rejected promises are propagated to Express's error pipeline, either through Express's supported async handling or an async wrapper that calls next(error).
+
+    Q6. What causes "Cannot set headers after they are sent"?
+        Usually attempting to send more than one response for the same request.
+
+    Q7. How would you handle a database duplicate-key error?
+        Detect the database-specific error, translate it into an application-level error such as 409 Conflict, and return a stable API response without exposing raw database details.
+
+
+
+⭐ Interview Mental Model
+Remember:
+    EXPECTED FAILURE
+        ↓
+    AppError
+        ↓
+    next(error)
+        ↓
+    Central Error Handler
+        ↓
+    Log internally
+        ↓
+    Safe response
+
+And these 5 rules:
+    Use next(error) to enter the error pipeline
+    Error middleware has 4 arguments
+    Centralize error handling
+    Don't expose internal errors
+    Never send multiple responses
