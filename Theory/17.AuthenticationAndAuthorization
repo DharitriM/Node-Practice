@@ -1,0 +1,351 @@
+Authentication & Authorization
+
+Authentication = Who are you?
+Authorization = What are you allowed to do?
+
+
+1. Authentication
+    Authentication verifies the user's identity.
+    Example:
+        User → email + password
+            → Server verifies credentials
+            → User authenticated
+
+        Common authentication methods:
+            Email + password
+            JWT
+            Session-based authentication
+            OAuth / Google login
+            API keys
+            Passwords
+
+        Never store passwords as plain text.
+
+    ❌ Bad:
+        {
+        email: "user@gmail.com",
+        password: "mypassword123"
+        }
+
+    Instead, store a password hash using algorithms such as bcrypt or Argon2.
+        const hash = await bcrypt.hash(password, 12);
+
+    During login:
+        const isValid = await bcrypt.compare(password, user.passwordHash);
+
+    Important interview point:
+    bcrypt/Argon2 are password hashing algorithms, not encryption. Hashing is designed to be one-way.
+
+
+2. Authorization
+    Authorization determines what an authenticated user can access.
+    Example:
+        User logs in
+            ↓
+        Authenticated ✅
+            ↓
+        Role = USER
+            ↓
+        Can access /profile
+        Cannot access /admin
+
+    Example roles:
+        USER
+        ADMIN
+        MANAGER
+
+    So:
+        Authentication → Are you John?
+        Authorization  → Is John allowed to delete users?
+
+
+3. Typical Login Flow
+    A real application commonly works like this:
+        POST /login
+            ↓
+        Validate email/password
+            ↓
+        Find user in DB
+            ↓
+        Compare password hash
+            ↓
+        Generate authentication credential
+            ↓
+        Send credential to client
+            ↓
+        Client sends it with future requests
+            ↓
+        Authentication middleware verifies it
+            ↓
+        Authorization checks permissions
+            ↓
+        Controller executes
+
+
+4. Authentication Middleware
+    Authentication is usually implemented as middleware.
+    Conceptually:
+        const authenticate = async (req, res, next) => {
+        try {
+            // get credential
+            // verify credential
+            // find user
+
+            req.user = user;
+
+            next();
+        } catch (error) {
+            next(error);
+        }
+        };
+
+    Then:
+        app.get(
+        "/profile",
+        authenticate,
+        getProfile
+        );
+
+    Request flow:
+        Request
+        ↓
+        authenticate
+        ↓
+        req.user = authenticated user
+        ↓
+        controller
+
+
+5. Authorization Middleware
+    Suppose only admins can delete users.
+        const authorize = (...roles) => {
+        return (req, res, next) => {
+            if (!roles.includes(req.user.role)) {
+            return res.status(403).json({
+                message: "Access denied"
+            });
+            }
+
+            next();
+        };
+        };
+
+    Usage:
+        app.delete(
+        "/users/:id",
+        authenticate,
+        authorize("ADMIN"),
+        deleteUser
+        );
+
+    Flow:
+        Request
+        ↓
+        Authentication
+        ↓
+        Who is the user?
+        ↓
+        Authorization
+        ↓
+        Does user have ADMIN role?
+        ↓
+        controller
+
+
+6. RBAC — Role-Based Access Control
+    Instead of checking individual users:
+        if (user.id === ...)
+    we assign roles.
+    Example:
+        {
+        id: 101,
+        email: "admin@test.com",
+        role: "ADMIN"
+        }
+
+    Permissions:
+        ADMIN
+        ├── create user
+        ├── update user
+        ├── delete user
+        └── view users
+
+        USER
+        ├── view profile
+        └── update profile
+
+    This is called RBAC.
+
+    For larger systems, you may move toward permission-based access control:
+        user:read
+        user:create
+        user:update
+        user:delete
+
+
+7. 401 vs 403 — VERY IMPORTANT
+    401 Unauthorized
+        Means:
+            Authentication is missing or invalid.
+
+        Examples:
+            No token
+            Invalid token
+            Expired token
+            Invalid credentials
+
+            return res.status(401).json({
+            message: "Authentication required"
+            });
+
+    403 Forbidden
+        Means:
+        User is authenticated, but doesn't have permission.
+
+        Example:
+            User is logged in
+            Role = USER
+            Trying to access ADMIN endpoint
+
+            return res.status(403).json({
+            message: "Forbidden"
+            });
+
+    Easy way to remember
+        401 → Who are you?
+        403 → I know who you are, but NO.
+
+
+8. Session vs Token Authentication
+    Two major approaches:
+        Session-based
+            Login
+            ↓
+            Server creates session
+            ↓
+            Session stored server-side
+            ↓
+            Client receives session cookie
+            ↓
+            Client sends cookie
+            ↓
+            Server looks up session
+        Token-based
+            Login
+            ↓
+            Server generates token
+            ↓
+            Client stores/sends token
+            ↓
+            Server verifies token
+
+    JWT is the most commonly discussed token mechanism in Node.js interviews.
+
+
+9. Where should auth credentials be stored?
+    For browser applications, an HttpOnly, Secure cookie is often a strong choice for session identifiers or tokens because JavaScript cannot directly read an HttpOnly cookie.
+    Example:
+        res.cookie("accessToken", token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "strict"
+        });
+
+    localStorage is accessible to JavaScript, so an XSS vulnerability can potentially expose a token stored there. The right design depends on the application's architecture and threat model.
+
+
+10. Authentication Security Checklist
+    In an interview, mention these:
+        Hash passwords with bcrypt/Argon2
+        Never store plaintext passwords
+        Use HTTPS
+        Validate login input
+        Rate-limit login attempts
+        Use secure, HttpOnly cookies where appropriate
+        Set token/session expiration
+        Rotate/revoke credentials where required
+        Keep secrets in environment/secret management systems
+        Don't expose sensitive information in errors
+        Implement authorization server-side — never trust the frontend
+
+
+11. Real-World Example
+    Suppose we have:
+        POST /login
+        GET  /profile
+        GET  /admin/users
+        DELETE /admin/users/:id
+
+    User logs in:
+        POST /login
+            ↓
+        Password verified
+            ↓
+        Authentication credential issued
+
+    Then:
+        GET /profile
+            ↓
+        authenticate
+            ↓
+        req.user
+            ↓
+        profile controller
+
+    For admin:
+        DELETE /admin/users/123
+            ↓
+        authenticate
+            ↓
+        authorize("ADMIN")
+            ↓
+        deleteUser()
+
+    A normal user:
+        DELETE /admin/users/123
+            ↓
+        authenticate ✅
+            ↓
+        authorize("ADMIN") ❌
+            ↓
+        403 Forbidden
+
+
+
+Interview Questions You Should Know
+Basic
+
+1. What is authentication?
+    Verifying the identity of a user.
+
+2. What is authorization?
+    Determining whether an authenticated user has permission to perform an action.
+
+3. Authentication vs authorization?
+    Authentication → Identity
+    Authorization   → Permissions
+
+4. Why shouldn't passwords be stored directly?
+    Because a database compromise would expose users' passwords. Passwords should be salted and hashed using algorithms such as bcrypt or Argon2.
+
+5. What is RBAC?
+    Role-Based Access Control, where permissions are assigned based on roles such as USER, ADMIN, or MANAGER.
+
+6. 401 vs 403?
+    401 → Authentication failure/missing authentication
+    403 → Authenticated but insufficient permission
+
+7. Where should authentication logic be implemented in Express?
+    Usually in middleware, so protected routes can reuse it.
+
+8. Can frontend authorization alone secure an API?
+    No. Authorization must always be enforced on the server.
+
+
+
+⭐ Interview-ready answer
+If asked:
+    "Explain authentication and authorization in a Node.js application."
+
+Say:
+    "Authentication verifies the user's identity, usually during login by validating credentials. After successful authentication, the server issues a session or token-based credential. Authentication middleware validates that credential on protected requests and attaches the authenticated user to the request. Authorization then checks whether that user has the required role or permission, such as ADMIN access. In Express, I typically separate authentication and authorization into reusable middleware. For example, a protected admin route would use authenticate first and authorize('ADMIN') next. I also use secure password hashing, HTTPS, rate limiting, and appropriate cookie or token security."
