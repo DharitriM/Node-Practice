@@ -1,0 +1,336 @@
+JWT, Cookies & Sessions
+
+1. JWT — JSON Web Token
+  JWT is a signed token format commonly used for stateless authentication.
+    A JWT looks like:
+      xxxxx.yyyyy.zzzzz
+
+    It has 3 parts:
+      HEADER.PAYLOAD.SIGNATURE
+
+    Header
+      Contains metadata:
+      {
+        "alg": "HS256",
+        "typ": "JWT"
+      }
+    Payload
+      Contains claims:
+      {
+        "userId": 101,
+        "role": "ADMIN",
+        "exp": 1780000000
+      }
+    Signature
+      Used to verify that the token was created by a trusted party and hasn't been modified.
+      Conceptually:
+        signature = sign(
+          base64(header) + "." + base64(payload),
+          secret
+        )
+
+  ⭐ Important
+  JWT is encoded, not encrypted by default.
+  Therefore, don't put sensitive information such as:
+    password
+    credit card number
+    private data
+  inside the payload.
+
+
+2. JWT Login Flow
+    POST /login
+          ↓
+    Validate credentials
+          ↓
+    Compare password hash
+          ↓
+    Create JWT
+          ↓
+    Send JWT to client
+          ↓
+    Client sends JWT on future requests
+          ↓
+    Server verifies JWT
+          ↓
+    req.user
+          ↓
+    Authorization
+
+  Example using jsonwebtoken:
+    const token = jwt.sign(
+      {
+        userId: user.id,
+        role: user.role
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "15m"
+      }
+    );
+
+  Verification:
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET
+    );
+
+  If the signature or expiration is invalid, verification fails.
+
+
+3. JWT Authentication Middleware
+  Typical Express implementation:
+    const authenticate = (req, res, next) => {
+      try {
+        const authHeader = req.headers.authorization;
+
+        if (!authHeader?.startsWith("Bearer ")) {
+          return res.status(401).json({
+            message: "Authentication required"
+          });
+        }
+
+        const token = authHeader.split(" ")[1];
+
+        const decoded = jwt.verify(
+          token,
+          process.env.JWT_SECRET
+        );
+
+        req.user = decoded;
+
+        next();
+      } catch (error) {
+        return res.status(401).json({
+          message: "Invalid or expired token"
+        });
+      }
+    };
+
+  Route:
+    app.get(
+      "/profile",
+      authenticate,
+      getProfile
+    );
+
+  Client sends:
+    Authorization: Bearer <token>
+
+
+4. Access Token vs Refresh Token
+  Access Token
+    Short-lived:
+      10–30 minutes
+    Used to access APIs.
+
+  Refresh Token
+    Long-lived:
+      Days / weeks
+    Used to obtain a new access token.
+
+  Flow:
+    Login
+    ↓
+    Access Token + Refresh Token
+    ↓
+    Access Token expires
+    ↓
+    Send Refresh Token
+    ↓
+    Server validates refresh token
+    ↓
+    New Access Token
+
+  Why two tokens?
+    Because you don't want a powerful API credential to remain valid for a long time.
+
+
+5. Example
+  Access Token
+    expires → 15 min
+
+  Refresh Token
+    expires → 7 days
+
+  Suppose an attacker steals the access token.
+  Its lifetime is limited to approximately 15 minutes.
+
+  A refresh-token system can also support revocation/rotation, giving you better control over long-lived authentication.
+
+
+6. Cookies
+  HTTP cookies are commonly used to transport session IDs or authentication tokens.
+  Example:
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "strict"
+    });
+
+  Important cookie flags
+    Flag	Purpose
+    HttpOnly	JavaScript cannot read cookie
+    Secure	Send only over HTTPS
+    SameSite	Helps control cross-site requests
+    Max-Age / Expires	Controls lifetime
+
+  HttpOnly is particularly useful against token theft through JavaScript-based XSS.
+
+
+7. JWT vs Session
+  Session-based authentication
+    Client
+      ↓
+    Session ID
+      ↓
+    Server
+      ↓
+    Session Store
+      ↓
+    User information
+
+  The server maintains session state.
+  Example:
+    sessionId = abc123
+
+  Redis:
+    abc123 → userId 101
+
+  JWT-based authentication
+    Client
+      ↓
+    JWT
+      ↓
+    Server verifies signature
+      ↓
+    User information from claims
+
+  The server doesn't necessarily need to maintain access-token state.
+
+
+8. JWT vs Session — Interview Comparison
+  JWT	Session
+    Server state	Usually less for access tokens	Session state required
+    Scaling	Easy horizontally	Requires shared session store or sticky sessions
+    Revocation	More involved	Usually easier
+    Token size	Larger	Small session ID
+    Common transport	Header/cookie	Cookie
+    Good for	APIs/service architectures	Traditional web apps
+
+  Don't say "JWT is always better."
+    The right choice depends on architecture and security requirements.
+
+
+9. Logout with JWT
+  A common interview trap:
+    "How do you invalidate a JWT before it expires?"
+      A purely stateless JWT cannot simply be deleted from the server because the server may not store it.
+
+  Possible approaches:
+    Short-lived access token
+      Reduce exposure:
+        Access token → 15 minutes
+    
+    Refresh-token revocation
+      Store refresh-token/session state server-side and revoke it during logout.
+
+    Token denylist
+      Store revoked token identifiers until their expiry.
+
+  This introduces server-side state.
+
+
+10. JWT Security Mistakes
+  ❌ Weak secret
+    jwt.sign(data, "12345");
+    Use a strong secret from secure configuration.
+
+  ❌ Long-lived access tokens
+    expiresIn: "30d"
+    Usually undesirable for access credentials.
+
+  ❌ Sensitive payload
+    {
+      "password": "..."
+    }
+    Never.
+
+  ❌ Trusting decoded JWT without verification
+    Bad:
+      const payload = jwt.decode(token);
+      decode() does not verify the signature.
+    Use:
+      jwt.verify(token, secret);
+
+  ❌ Storing tokens carelessly
+    Consider HttpOnly Secure cookies where appropriate, especially for browser-based applications.
+
+
+11. Very Important JWT Interview Question
+  Is JWT encrypted?
+    No, not by default.
+
+  JWTs are generally Base64URL encoded and digitally signed.
+  Therefore:
+    Anyone who possesses the token can generally decode its payload.
+
+  The signature protects integrity/authenticity, not confidentiality.
+  If confidentiality is required, you need an encryption mechanism such as JWE or another secure channel/design.
+
+
+12. Complete Authentication Architecture
+  A production-style architecture might look like:
+
+                  LOGIN
+                    ↓
+              Validate credentials
+                    ↓
+              Password comparison
+                    ↓
+          ┌──────────┴──────────┐
+          ↓                     ↓
+  Access Token          Refresh Token
+  short-lived           long-lived
+          ↓                     ↓
+      API calls          Token renewal
+          ↓
+  Authentication Middleware
+          ↓
+        req.user
+          ↓
+  Authorization Middleware
+          ↓
+      Controller
+
+
+
+
+⭐ Interview Questions
+Q1. What are the three parts of JWT?
+  Header
+  Payload
+  Signature
+
+Q2. Is JWT encrypted?
+  No. A normal JWT is encoded and signed, not encrypted.
+
+Q3. Why use refresh tokens?
+  To issue new short-lived access tokens without requiring the user to log in again.
+
+Q4. What is the difference between jwt.decode() and jwt.verify()?
+  decode() reads the payload without validating authenticity.
+  verify() validates the token's signature and registered claims such as expiration.
+
+Q5. Where should JWT be stored?
+  There isn't one universal answer. For browser applications, HttpOnly + Secure cookies are often preferred when compatible with the architecture because JavaScript cannot directly access them. Authorization headers are also common for APIs.
+
+Q6. How do you invalidate JWT?
+  Use short-lived access tokens plus refresh-token revocation/rotation, or maintain a denylist when immediate revocation is required.
+
+Q7. JWT vs session?
+  "JWT can reduce server-side state for access-token verification, while sessions maintain server-side authentication state. Sessions are often easier to revoke, while JWTs can simplify horizontally scaled APIs, but JWT isn't inherently superior."
+
+⭐ Strong Interview Answer
+  "Explain JWT authentication."
+    "After successful login, the server generates a signed JWT containing claims such as the user ID and role. The client sends the access token with subsequent requests. Authentication middleware extracts and verifies the token using the server's secret or public key and attaches the decoded claims to req.user. Authorization middleware then checks the user's roles or permissions. I prefer short-lived access tokens and a refresh-token mechanism for longer sessions. For browser applications, I consider HttpOnly and Secure cookies to reduce token exposure to JavaScript. JWT payloads shouldn't contain sensitive information because a standard JWT is signed, not encrypted."
