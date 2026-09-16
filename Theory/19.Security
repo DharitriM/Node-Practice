@@ -1,0 +1,203 @@
+Node.js Security
+
+1. Helmet
+    Helmet adds security-related HTTP headers in Express.
+        import helmet from "helmet";
+        app.use(helmet());
+    It helps protect against certain attacks by configuring headers such as CSP-related policies, MIME sniffing, and clickjacking protections.
+
+    Interview answer:
+        “Helmet is Express middleware that sets security-related HTTP headers to reduce common web security risks.”
+
+
+2. CORS
+    CORS = Cross-Origin Resource Sharing.
+    Example:
+        import cors from "cors";
+        app.use(cors({
+            origin: "https://myfrontend.com",
+            credentials: true
+        }));
+
+    Don't blindly do:
+        cors({ origin: "*" })
+
+    especially when credentials/cookies are involved.
+
+    What is CORS?
+        “CORS is a browser security mechanism that controls which origins are allowed to make cross-origin requests to my API.”
+
+
+3. XSS
+    XSS = Cross-Site Scripting.
+    Attacker injects malicious JavaScript into content that gets executed in another user's browser.
+    Example:
+        <script>
+        stealData();
+        </script>
+
+    Protection:
+        Escape/sanitize untrusted HTML
+        Content Security Policy
+        Avoid unsafe innerHTML
+        Use framework escaping
+        HttpOnly cookies help prevent JavaScript from directly reading authentication cookies
+
+
+4. SQL Injection
+    Attacker manipulates SQL through user input.
+    ❌ Dangerous:
+        const query =
+        `SELECT * FROM users WHERE email = '${email}'`;
+
+    Use parameterized queries:
+        const query =
+        "SELECT * FROM users WHERE email = $1";
+        
+        await db.query(query, [email]);
+
+    With ORMs such as TypeORM, use parameterized/query-builder mechanisms rather than constructing SQL with untrusted input.
+
+
+5. NoSQL Injection
+    Relevant when using MongoDB.
+
+    Don't blindly pass user-controlled objects into queries.
+    For example, malicious input could attempt operators such as:
+        {
+        "$ne": null
+        }
+
+Validate the expected input type and schema before querying.
+
+
+6. Rate Limiting
+    Protect endpoints from excessive requests, especially:
+        /login
+        /forgot-password
+        /otp
+        /api/*
+
+    Example:
+        import rateLimit from "express-rate-limit";
+
+        const limiter = rateLimit({
+        windowMs: 15 * 60 * 1000,
+        limit: 100
+        });
+
+        app.use("/api", limiter);
+
+    For distributed production systems, rate-limit state may need to be stored in a shared system such as Redis rather than only process memory.
+
+
+7. Input Validation
+    Never trust client input.
+    Validate:
+        type
+        format
+        length
+        required fields
+        allowed values
+        ranges
+
+    Example:
+        const userSchema = z.object({
+        email: z.string().email(),
+        age: z.number().int().positive()
+        });
+
+    Validation should happen before business logic/database operations.
+
+
+8. Secrets & Environment Variables
+    ❌ Don't:
+        const JWT_SECRET = "my-secret-123";
+
+    Use environment/secret management:
+        const jwtSecret = process.env.JWT_SECRET;
+
+    Never commit:
+        .env
+        API keys
+        JWT secrets
+        database passwords
+        private keys
+    to source control.
+
+
+CSRF — Important for Cookie Authentication
+    CSRF = Cross-Site Request Forgery.
+    It is particularly relevant when browsers automatically attach authentication cookies.
+    Example:
+        User logged into bank.com
+                ↓
+        Visits malicious-site.com
+                ↓
+        Malicious site attempts request to bank.com
+                ↓
+        Browser may automatically attach cookies
+
+    Defenses can include:
+        SameSite cookies
+        CSRF tokens
+        Origin/Referer validation where appropriate
+        Avoiding unnecessary state-changing GET requests
+
+
+HTTPS
+    Authentication credentials should be transmitted over HTTPS.
+    HTTPS provides encryption in transit and protects against network attackers intercepting credentials/tokens.
+
+    In production:
+        Client
+        ↓ HTTPS
+        Load Balancer / Reverse Proxy
+        ↓
+        Node.js
+        Security Headers
+
+    Common security-related headers include:
+        Content-Security-Policy
+        Strict-Transport-Security
+        X-Content-Type-Options
+        Referrer-Policy
+
+    Helmet can help configure several of these.
+
+
+
+
+Question:
+“Your Node.js login API is being attacked with thousands of requests. What would you do?”
+Answer:
+    “I would apply rate limiting, especially on authentication endpoints, validate the request body, use strong password hashing, enforce HTTPS, monitor suspicious activity, and potentially add IP/user-based throttling at the API gateway or Redis layer. I would also log authentication failures without exposing sensitive credentials.”
+
+Another Scenario
+“Your API is vulnerable to SQL injection. How do you fix it?”
+    “I would never concatenate user input directly into SQL. I would use parameterized queries or a properly configured ORM/query builder, validate input, and restrict database permissions using least privilege.”
+
+
+
+
+⭐ Most Asked Security Questions
+What is CORS?
+What is XSS?
+What is CSRF?
+What is SQL injection?
+What is NoSQL injection?
+What is Helmet?
+Why do we use rate limiting?
+Why is input validation important?
+How do you securely store passwords?
+Why use HTTPS?
+Where should secrets be stored?
+How would you secure a login API?
+How do HttpOnly cookies improve security?
+What is Content Security Policy?
+How would you secure a Node.js API in production?
+
+
+
+⭐ One-line production answer
+    “For a production Node.js API, I would use HTTPS, Helmet/security headers, strict CORS, input validation, parameterized database queries, secure password hashing, protected cookies or tokens, rate limiting, secret management, authorization checks, structured security logging, and dependency/security monitoring.”
