@@ -1,0 +1,353 @@
+Transactions And Concurrency
+
+1. What is Concurrency?
+    Concurrency means multiple operations are happening or being processed around the same time.
+    Example:
+        Product stock = 1
+        User A → Buy product
+        User B → Buy product
+
+    Both requests arrive almost simultaneously.
+    Without proper handling:
+        A reads stock = 1
+        B reads stock = 1
+
+        A → stock = 0
+        B → stock = 0
+
+    Both orders succeed ❌
+    You have a race condition.
+
+
+2. Race Condition ⭐⭐⭐
+    A race condition occurs when the result depends on the timing/order of concurrent operations.
+
+    Common examples:
+        Stock updates
+        Bank balance
+        Seat booking
+        Coupon usage
+        Wallet transactions
+        Order processing
+
+
+3. Transaction
+    A transaction groups operations into one logical unit.
+    Example:
+        BEGIN
+        ↓
+        Create order
+        ↓
+        Reduce stock
+        ↓
+        Create payment
+        ↓
+        COMMIT
+
+    If something fails:
+        ROLLBACK
+
+    So you don't end up with:
+        Order created ✅
+        Payment failed ❌
+        Stock reduced ❌
+
+    when your business rules require those operations to be atomic.
+
+
+4. ACID ⭐⭐⭐
+    Atomicity
+        All operations succeed or all are rolled back.
+
+    Consistency
+        Database moves from one valid state to another valid state.
+
+    Isolation
+        Concurrent transactions shouldn't improperly interfere with each other.
+
+    Durability
+        Once committed, data survives failures according to the database's durability guarantees.
+
+
+5. Isolation Levels ⭐⭐⭐
+    Common SQL isolation levels:
+        READ UNCOMMITTED
+        READ COMMITTED
+        REPEATABLE READ
+        SERIALIZABLE
+
+    PostgreSQL's default isolation level is generally:
+        READ COMMITTED
+
+
+6. Dirty Read
+    Transaction A changes data but hasn't committed.
+    Transaction B reads that uncommitted data.
+        A → update balance = 500
+            ↓
+        B → reads 500
+            ↓
+        A → ROLLBACK
+
+    B read data that never actually committed.
+    That's a dirty read.
+
+
+7. Non-Repeatable Read
+    Transaction A reads:
+        balance = 1000
+
+    Transaction B updates it:
+        balance = 500
+        COMMIT
+    Transaction A reads again:
+        balance = 500
+
+    Same transaction, different result.
+
+
+8. Phantom Read
+    Transaction A queries:
+        SELECT * FROM orders
+        WHERE amount > 1000;
+
+    Then Transaction B inserts another matching order.
+    Transaction A runs the same query again and sees an additional row.
+    That's a phantom read.
+
+
+9. Optimistic Locking ⭐⭐⭐
+    Optimistic locking assumes conflicts are relatively uncommon.
+    Typical approach:
+        version = 5
+
+    User reads:
+        version = 5
+
+    Another user updates it:
+        version = 6
+
+    First user tries to update using:
+        WHERE id = 10
+        AND version = 5
+    No row matches → update fails.
+
+    Conceptually:
+        Read version 5
+            ↓
+        Someone changes record
+            ↓
+        Version becomes 6
+            ↓
+        Old update rejected
+
+    Useful when:
+        conflicts are relatively rare
+        you don't want to hold DB locks
+        user edits can take time
+
+
+10. Pessimistic Locking ⭐⭐⭐
+    Pessimistic locking assumes conflicts are likely.
+    You lock the database row while performing the transaction.
+
+    Conceptually:
+        SELECT *
+        FROM products
+        WHERE id = 10
+        FOR UPDATE;
+
+    Another transaction trying to lock the same row must wait according to the database's locking rules.
+
+    Useful for scenarios such as:
+        Inventory
+        Seat booking
+        Financial balances
+        Critical counters
+
+
+11. Optimistic vs Pessimistic
+    | Optimistic              | Pessimistic                                    |
+    | ----------------------- | ---------------------------------------------- |
+    | Doesn't lock initially  | Locks resource                                 |
+    | Detects conflict later  | Prevents conflicting modification while locked |
+    | Good for low contention | Good for high contention                       |
+    | Less blocking           | More blocking                                  |
+    | Uses version/check      | Uses DB locks                                  |
+
+    "I would choose based on contention and business requirements. For relatively low-conflict updates, optimistic locking can work well. For highly contested resources such as limited inventory, pessimistic locking inside a short transaction may be appropriate."
+
+
+12. Real-World Stock Example ⭐⭐⭐
+    Suppose:
+        Stock = 1
+    Two users purchase simultaneously.
+
+    A safer approach:
+        BEGIN
+        ↓
+        Lock product row
+        ↓
+        Read stock
+        ↓
+        Check stock > 0
+        ↓
+        Decrease stock
+        ↓
+        Create order
+        ↓
+        COMMIT
+
+    Request B waits for the lock.
+    After A commits:
+        Stock = 0
+
+    B then sees:
+        Stock = 0
+
+    and the order fails.
+
+
+13. Deadlock ⭐⭐
+    A deadlock occurs when transactions wait for each other's locks.
+    Example:
+    Transaction A
+    locks Row 1
+    ↓
+    waits for Row 2
+
+    Transaction B
+    locks Row 2
+    ↓
+    waits for Row 1
+    A → waiting for B
+    B → waiting for A
+
+    Database detects the deadlock and typically aborts one transaction.
+    Prevention
+        Keep transactions short
+        Acquire locks in consistent order
+        Avoid unnecessary locks
+        Avoid user/network calls inside transactions
+        Retry safely where appropriate after transient/deadlock failures
+
+
+14. Transactions Should Be Short
+    Bad:
+        BEGIN
+        ↓
+        DB operation
+        ↓
+        Call external payment API
+        ↓
+        Wait 5 seconds
+        ↓
+        Another DB operation
+        ↓
+        COMMIT
+
+    This keeps database resources/locks held unnecessarily.
+    Better:
+        Validate
+        ↓
+        Perform required external work where appropriate
+        ↓
+        Short DB transaction
+        ↓
+        COMMIT
+
+    The exact design depends on whether the external operation itself must participate in a distributed workflow.
+
+
+15. Node.js + TypeORM Example
+    await dataSource.transaction(async manager => {
+        const product = await manager.findOne(Product, {
+            where: { id: productId }
+        });
+
+        if (!product || product.stock <= 0) {
+            throw new Error("Out of stock");
+        }
+
+        product.stock -= 1;
+
+        await manager.save(product);
+
+        await manager.save(Order, {
+            productId,
+            userId
+        });
+    });
+
+    Important:
+    Use manager for the operations that must participate in this transaction.
+
+
+16. Database Transaction ≠ Distributed Transaction
+    Suppose:
+        PostgreSQL
+        +
+        Payment Gateway
+        +
+        Email Service
+
+    A PostgreSQL transaction cannot automatically roll back an external payment gateway request.
+    This is a distributed workflow problem.
+
+    Common patterns include:
+        Saga
+        Outbox Pattern
+        Idempotency
+        Compensation
+
+    You don't need to implement these for basic interviews, but know why they exist.
+
+
+17. Idempotency ⭐⭐⭐
+    Suppose client sends:
+        POST /payments
+
+    Then network times out.
+    Client doesn't know whether payment succeeded.
+    It retries.
+
+    Without protection:
+        Payment 1 ✅
+        Payment 2 ✅
+    Duplicate payment.
+
+    Use an idempotency key:
+        Idempotency-Key: abc123
+
+    Server stores/processes that key so the retry doesn't create another payment.
+
+
+⭐ Most Asked Interview Questions
+    Q1. What is a race condition?
+        A situation where concurrent operations access or modify shared state and the final result depends on their timing.
+
+    Q2. What is a transaction?
+        A group of database operations treated as one logical unit that can commit or roll back.
+
+    Q3. What is ACID?
+        Atomicity, Consistency, Isolation and Durability.
+
+    Q4. Optimistic vs pessimistic locking?
+        Optimistic locking detects conflicting updates, usually using a version/check. Pessimistic locking acquires database locks to prevent conflicting modifications while the transaction is active.
+
+    Q5. What is a deadlock?
+        When transactions hold resources/locks while waiting for resources/locks held by each other, creating a circular wait.
+
+    Q6. How would you prevent overselling inventory?
+        "I'd perform the stock check and decrement atomically, typically inside a short transaction with appropriate row locking or an atomic conditional update. I'd also ensure duplicate requests are handled idempotently."
+
+    Q7. Why shouldn't external API calls happen inside a DB transaction?
+        They can make the transaction long-lived, hold locks and connections unnecessarily, and the external operation cannot automatically roll back with the database transaction.
+
+
+⭐ Strong Scenario Answer
+Interviewer:
+    "Two users try to book the last available seat simultaneously. How do you handle it?"
+
+Answer:
+    "I would make the booking operation atomic. I'd use a database transaction and either pessimistically lock the seat row or use an atomic conditional update such as updating only when the seat is still available. After successfully reserving it, I'd create the booking and commit. If another request loses the race, it would receive an appropriate conflict or unavailable response. I'd also use an idempotency mechanism if duplicate client retries are possible."
