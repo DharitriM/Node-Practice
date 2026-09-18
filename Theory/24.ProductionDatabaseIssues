@@ -1,0 +1,392 @@
+Production Database Issues
+
+1. Connection Pool Exhaustion ⭐⭐⭐
+    Suppose your application has:
+        DB pool = 20 connections
+
+    But all 20 are occupied by long-running queries.
+
+    New requests:
+        Request
+        ↓
+        Needs DB connection
+        ↓
+        No connection available
+        ↓
+        Waits / times out
+
+    Symptoms:
+        API becomes slow
+        DB connection timeout errors
+        Requests pile up
+        High response latency
+        What would you check?
+        Pool size
+        Active connections
+        Idle connections
+        Long-running queries
+        Connection leaks
+        Database max_connections
+        Application traffic
+
+
+2. Connection Leak
+    A connection is acquired but isn't properly released.
+    Conceptually:
+        Acquire connection
+        ↓
+        Query
+        ↓
+        ERROR
+        ↓
+        Connection never released ❌
+
+    Repeated many times:
+        Pool
+        ↓
+        Connections gradually consumed
+        ↓
+        Pool exhausted
+
+    Use the driver's/ORM's managed transaction or pool APIs so connections are reliably returned.
+
+
+3. Slow Query ⭐⭐⭐
+    If an API takes:
+        5 seconds
+
+    don't immediately blame Node.js.
+    Break down the latency:
+        Request
+        ↓
+        Middleware       10ms
+        ↓
+        Service           5ms
+        ↓
+        Database        4800ms  ← bottleneck
+        ↓
+        Response          20ms
+
+    Investigate:
+        Query execution time
+        Query plan
+        Missing indexes
+        N+1 queries
+        Large result sets
+        Locks
+        CPU/memory/IO
+        Connection pool waiting
+
+    For PostgreSQL:
+        EXPLAIN ANALYZE
+        SELECT ...
+
+
+4. Database Connection Error
+    Example:
+        ECONNREFUSED
+        connection timeout
+        too many connections
+        authentication failed
+
+    Troubleshooting:
+        1. Is DB running?
+        2. Is hostname correct?
+        3. Is port accessible?
+        4. Are credentials correct?
+        5. Is network/security group configured?
+        6. Is DB accepting connections?
+        7. Has connection limit been reached?
+        8. Is the application pool configured correctly?
+        5. Database Timeout ⭐⭐⭐
+
+    Always think about timeouts.
+    Without a timeout:
+        Request
+        ↓
+        DB query hangs
+        ↓
+        Node request waits
+        ↓
+        Connection remains occupied
+
+    With appropriate timeouts:
+        Request
+        ↓
+        DB query
+        ↓
+        Timeout
+        ↓
+        Fail fast
+        ↓
+        Return appropriate error
+
+    But don't blindly retry every timeout.
+
+
+6. Retry Strategy
+    Retries can help with transient failures.
+    Example:
+        DB temporarily unavailable
+                ↓
+        Retry
+                ↓
+        Success
+
+    But dangerous:
+        POST payment
+        ↓
+        Timeout
+        ↓
+        Retry
+        ↓
+        Duplicate operation ❌
+
+    Therefore, retries should consider:
+        Is the operation idempotent?
+        Is the error transient?
+        Maximum retry count
+        Exponential backoff
+        Jitter
+        Overall timeout/deadline
+
+
+7. Exponential Backoff
+    Instead of:
+        retry immediately
+        retry immediately
+        retry immediately
+
+    use increasing delays:
+        100ms
+        200ms
+        400ms
+        800ms
+
+    Usually add jitter so many instances don't retry simultaneously.
+
+
+8. Database Outage ⭐⭐⭐
+Suppose PostgreSQL goes down.
+Don't let Node.js endlessly wait for the database.
+Architecture:
+    Client
+    ↓
+    API
+    ↓
+    Database ❌
+
+Your application should:
+    Have connection/query timeouts
+    Fail gracefully
+    Return an appropriate service/database-unavailable response
+    Log the failure
+    Monitor/alert
+    Recover connections when DB returns
+    Avoid retry storms
+
+
+9. Read Replicas
+    For read-heavy systems:
+                        ┌→ Primary DB
+        Writes ──────────┤
+                        │
+        Reads ───────────┼→ Replica 1
+                        └→ Replica 2
+
+    Primary handles writes.
+    Replicas handle some reads.
+
+    Benefits:
+        Scale read workload
+        Reduce primary DB load
+
+    But there's an important issue:
+        Replication lag
+        Write → Primary
+                ↓
+            Replica
+                ↓
+            slight delay
+
+    Immediately reading from a replica might return stale data.
+
+
+10. Read-After-Write Problem
+Example:
+    POST /user
+    ↓
+    Write → Primary
+    ↓
+    GET /user
+    ↓
+    Read → Replica
+    ↓
+    User not found ❌
+
+Why?
+    The replica hasn't received the latest change yet.
+
+Solutions depend on requirements:
+    Read from primary when strong consistency is required
+    Route related reads appropriately
+    Use consistency/session mechanisms supported by the database
+    Design around eventual consistency
+
+
+11. Database Locks
+Suppose:
+    Transaction A
+    ↓
+    Locks row
+    ↓
+    Long operation
+
+Transaction B:
+    Needs same row
+    ↓
+    WAIT
+
+Too many locks can cause:
+    High latency
+    Lock contention
+    Deadlocks
+    Timeouts
+
+Troubleshoot:
+    Long-running transactions
+    Lock waits
+    Transaction duration
+    Queries holding locks
+    Transaction ordering
+
+
+12. Production Migration ⭐⭐⭐
+    Never casually do:
+        synchronize: true
+    on production databases.
+
+    Use migrations:
+        Code
+        ↓
+        Migration
+        ↓
+        Review
+        ↓
+        Backup/rollback strategy
+        ↓
+        Deploy
+        ↓
+        Run migration
+
+    For large tables, migrations need extra care.
+    Example:
+        ALTER TABLE users
+        ADD COLUMN ...
+
+    A schema change can potentially cause locking or long-running operations depending on the database/version and exact change.
+
+
+13. Zero-Downtime Migration
+    Suppose you want to rename:
+        username → display_name
+
+    A risky deployment might immediately remove username.
+    Existing application instances may still use it.
+
+    Safer approach:
+        Step 1
+        Add display_name
+
+        Step 2
+        Deploy code supporting both
+
+        Step 3
+        Backfill data
+
+        Step 4
+        Switch reads/writes
+
+        Step 5
+        Verify
+
+        Step 6
+        Remove old column later
+
+    This is often called an expand-and-contract migration.
+
+
+14. Database Monitoring ⭐⭐⭐
+    Monitor:
+        Query latency
+        Connection count
+        Pool utilization
+        CPU
+        Memory
+        Disk/IO
+        Lock waits
+        Deadlocks
+        Slow queries
+        Error rate
+        Replication lag
+
+    Tools can include:
+        Application metrics
+        Database monitoring
+        Prometheus
+        Grafana
+        Cloud provider monitoring
+        Database-native statistics
+
+
+15. Scenario — API Suddenly Becomes Slow
+    Interviewer:
+        "Your Node.js API was fast yesterday but suddenly became slow today. What do you check?"
+
+    Strong answer:
+        "I'd first determine whether the latency is coming from Node.js, the database, or an external dependency. For the database I'd check query latency, connection-pool utilization, slow queries, execution plans, locks, deadlocks and database resource usage. I'd compare current traffic and deployment changes with the previous baseline. If a particular query is slow, I'd inspect its execution plan and indexes before making changes."
+
+
+16. Scenario — Too Many DB Connections
+    "I'd check whether connections are being leaked, whether transactions are staying open too long, and whether the pool size is appropriate relative to database capacity and application instance count. I'd also check the database's maximum connection limit and current active/idle connections."
+
+    Important formula concept
+        If you have:
+            10 application instances
+            pool max = 20
+
+            Potential maximum:
+                10 × 20 = 200 connections
+
+    So don't configure each application's pool independently without considering the total across all instances.
+
+
+17. Scenario — Database Goes Down
+    "I'd use connection and query timeouts, fail gracefully, monitor the database, and allow the application to recover when connectivity returns. For transient failures I'd use bounded exponential-backoff retries where the operation is safe to retry. I would avoid aggressive retries because they can create a retry storm."
+
+
+⭐ Most Important Questions
+    Q1. What causes connection pool exhaustion?
+        Too many concurrent requests
+        Pool too small
+        Long-running queries
+        Long transactions
+        Connection leaks
+        Database connection limits
+
+    Q2. How do you troubleshoot a slow query?
+        Measure → inspect SQL → EXPLAIN ANALYZE → indexes → joins → result size → locks → resources.
+
+    Q3. Why shouldn't you retry every DB failure?
+        Some failures aren't transient, and retrying non-idempotent operations can create duplicate side effects or overload the database.
+
+    Q4. What is replication lag?
+        The delay between a write being committed on the primary and that change becoming visible on a replica.
+
+    Q5. How do you perform production schema changes safely?
+        Use versioned migrations and, for potentially disruptive changes, use backward-compatible expand-and-contract steps.
+
+
+⭐ 30-Second Interview Answer
+    "How would you troubleshoot a production database issue?"
+        "I'd start with observability: API latency, database query latency, connection-pool utilization and database resource metrics. Then I'd identify whether the problem is connection exhaustion, slow queries, locks, deadlocks, replication lag or an infrastructure issue. For slow queries I'd inspect the execution plan and indexes. For connection issues I'd check leaks, transaction duration, pool configuration and database connection limits. I'd apply bounded retries only for safe transient failures and make schema changes through controlled migrations."
