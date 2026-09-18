@@ -1,0 +1,362 @@
+SQL + TypeORM / Sequelize
+
+1. SQL Relationships ⭐⭐⭐
+    One-to-One
+        One user has one profile.
+        User 1 ───── 1 Profile
+    One-to-Many
+        One restaurant has many menu items.
+        Restaurant 1 ───── * MenuItems
+    Many-to-Many
+        One user can have multiple roles, and one role can belong to multiple users.
+        Users * ───── * Roles
+
+    Usually implemented using a junction/join table:
+        users
+        roles
+        user_roles
+
+
+2. SQL JOINs ⭐⭐⭐
+    Suppose:
+        users
+            id | name
+
+        orders
+            id | user_id | amount
+            
+    INNER JOIN
+        Only matching records:
+            SELECT u.name, o.amount
+            FROM users u
+            INNER JOIN orders o
+            ON u.id = o.user_id;
+    LEFT JOIN
+        All users + matching orders:
+            SELECT u.name, o.amount
+            FROM users u
+            LEFT JOIN orders o
+            ON u.id = o.user_id;
+
+    Even users without orders can appear.
+    RIGHT JOIN
+        All records from the right table plus matching left records.
+    FULL JOIN
+        Returns matching and non-matching records from both sides.
+    
+    Interview shortcut
+        INNER → matching only
+        LEFT  → everything from left
+        RIGHT → everything from right
+        FULL  → everything from both
+
+
+3. TypeORM Entity
+    Example:
+        @Entity("users")
+        export class User {
+            @PrimaryGeneratedColumn()
+            id: number;
+
+            @Column()
+            name: string;
+
+            @Column({ unique: true })
+            email: string;
+        }
+
+    Entity maps application objects to database tables.
+
+
+4. Repository
+    const userRepository = dataSource.getRepository(User);
+
+    Find:
+        const user = await userRepository.findOne({
+            where: {
+                email
+            }
+        });
+
+    Create:
+        const user = userRepository.create({
+            name,
+            email
+        });
+
+    await userRepository.save(user);
+
+
+5. save() vs insert() ⭐
+    save()
+        Can insert or update depending on entity state/identity.
+        await repository.save(user);
+    
+    insert()
+        Explicitly performs an insert operation.
+        await repository.insert({
+            name,
+            email
+        });
+
+    For bulk/simple insert operations, insert() can be more direct.
+
+
+6. QueryBuilder ⭐⭐⭐
+    When repository methods aren't enough, use QueryBuilder.
+
+    const users = await userRepository
+        .createQueryBuilder("user")
+        .where("user.isActive = :isActive", {
+            isActive: true
+        })
+        .getMany();
+
+    Parameterized values are important.
+    ❌ Don't concatenate user input into SQL:
+        .where(`user.email = '${email}'`)
+    Use parameters:
+        .where("user.email = :email", { email })
+
+    This helps prevent SQL injection.
+
+
+7. Relations in TypeORM
+One-to-many:
+    @OneToMany(
+    () => MenuItem,
+    menuItem => menuItem.restaurant
+    )
+    menuItems: MenuItem[];
+
+Many-to-one:
+    @ManyToOne(
+    () => Restaurant,
+    restaurant => restaurant.menuItems
+    )
+    restaurant: Restaurant;
+
+Conceptually:
+    Restaurant
+    ↓
+    MenuItems
+
+
+8. Loading Relations
+    You can explicitly request relations:
+        const restaurant = await restaurantRepository.findOne({
+                where: { id },
+                relations: {
+                menuItems: true
+                }
+            });
+
+    Be careful with loading large relation graphs.
+    You don't want:
+        Restaurant
+        ↓
+        Users
+        ↓
+        Orders
+        ↓
+        Items
+        ↓
+        Payments
+        ↓
+        ...
+
+    unless the endpoint actually needs all of that.
+
+
+9. Eager vs Lazy Loading
+    Eager
+        Relation automatically loads with the entity.
+        Convenient, but potentially expensive.
+
+    Lazy
+        Relation is loaded when accessed.
+        Can also cause unexpected additional queries and N+1 problems.
+
+    Interview answer:
+        "I prefer explicit relation loading for most APIs so that each endpoint controls exactly what data it needs."
+
+
+10. Migrations ⭐⭐⭐
+    A migration is a version-controlled database schema change.
+    Example:
+        Migration 1
+        → create users
+
+        Migration 2
+        → add role column
+
+        Migration 3
+        → create subscriptions
+
+    Typical flow:
+        Entity change
+            ↓
+        Generate migration
+            ↓
+        Review migration
+            ↓
+        Run migration
+            ↓
+        Database updated
+
+    Never assume changing an entity automatically updates a production database.
+
+
+11. Synchronize vs Migrations
+    TypeORM:
+        synchronize: true
+    can automatically synchronize schema.
+    Useful for development in controlled situations.
+    But generally avoid it in production.
+
+    Production:
+        Entity
+        ↓
+        Migration
+        ↓
+        Review
+        ↓
+        Deploy
+        ↓
+        Run migration
+    Interview answer
+        "I use migrations for controlled, versioned production schema changes rather than relying on automatic synchronization."
+
+
+12. Transactions in TypeORM ⭐⭐⭐
+    Example concept:
+        await dataSource.transaction(
+            async manager => {
+                await manager.save(order);
+                await manager.save(payment);
+                await manager.save(stockUpdate);
+            }
+        );
+
+    If an operation fails, the transaction is rolled back.
+    Important:
+        Inside the transaction, use the transaction's manager for the operations that must belong to that transaction.
+
+    Don't accidentally use an unrelated global repository and assume it participates in the transaction.
+
+
+13. Isolation Levels
+    Transactions can use isolation levels such as:
+        READ UNCOMMITTED
+        READ COMMITTED
+        REPEATABLE READ
+        SERIALIZABLE
+
+    PostgreSQL commonly defaults to:
+        READ COMMITTED
+
+    Higher isolation can reduce certain concurrency anomalies but may increase contention.
+
+    For interviews, know the common anomalies:
+        Dirty read
+        Non-repeatable read
+        Phantom read
+
+
+14. Indexes
+    TypeORM:
+        @Index(["restaurantId", "createdAt"])
+        @Entity()
+        export class Order {
+        // ...
+        }
+
+    Indexes are especially useful for:
+        WHERE
+        JOIN
+        ORDER BY
+        UNIQUE constraints
+
+    But too many indexes slow writes and consume storage.
+
+
+15. Soft Delete
+    Instead of physically deleting:
+        DELETE FROM users WHERE id = 10;
+
+    you can maintain a deletion timestamp:
+        deletedAt = current timestamp
+
+    TypeORM supports:
+        @DeleteDateColumn()
+        deletedAt: Date | null;
+
+    This is useful when data needs to be recoverable or retained for business/audit requirements.
+
+
+16. Common TypeORM Performance Problem
+    Suppose you fetch:
+        100 restaurants
+    and then separately fetch menu items for every restaurant.
+
+    Potential result:
+        1 query → restaurants
+        100 queries → menu items
+
+    That's the N+1 problem.
+    Solutions:
+        JOIN
+        controlled relation loading
+        QueryBuilder
+        batching
+        redesigning the endpoint/query
+
+
+17. SQL Scenario ⭐
+    Interviewer:
+        "An API returns restaurants with their menu items and is taking 5 seconds. What would you check?"
+
+    Answer:
+        "I'd first measure the database queries and identify whether we're generating N+1 queries. Then I'd inspect the SQL and execution plan, check indexes on join and filtering columns, load only required fields, and use an appropriate JOIN or optimized QueryBuilder query. I'd also check the response size and database connection pool."
+
+
+18. TypeORM vs Sequelize
+    | TypeORM                                | Sequelize                       |
+    | -------------------------------------- | ------------------------------- |
+    | Strong TypeScript support              | Mature Node ORM                 |
+    | Decorator-based entities commonly used | Model-based API                 |
+    | QueryBuilder                           | Query methods                   |
+    | Good NestJS integration                | Broad framework support         |
+    | Supports PostgreSQL, MySQL etc.        | Supports PostgreSQL, MySQL etc. |
+
+
+⭐ Most Asked Interview Questions
+    Q1. What is ORM?
+        An ORM maps application objects/entities to relational database structures and provides APIs for database operations.
+
+    Q2. What is TypeORM?
+        A TypeScript/JavaScript ORM that supports relational databases and provides entities, repositories, QueryBuilder, relations, migrations and transactions.
+
+    Q3. What is QueryBuilder?
+        A programmatic API for constructing more complex SQL queries while allowing parameterized values.
+
+    Q4. Why use migrations?
+        They provide version-controlled, repeatable and controlled database schema changes.
+
+    Q5. What is eager loading?
+        Automatically loading configured relations along with an entity.
+
+    Q6. What is lazy loading?
+        Loading a relation only when it is accessed.
+
+    Q7. What is N+1?
+        One query loads the parent records and then an additional query is executed for each parent record.
+
+    Q8. What is a transaction?
+        A group of database operations executed atomically so they either commit together or roll back.
+
+
+
+⭐ Strong Interview Answer
+    "Explain how you structure PostgreSQL with NestJS/TypeORM."
+        "I define database entities using TypeORM decorators and use repositories for standard CRUD operations. Business logic stays in the service layer, while repositories or dedicated data-access methods handle database interaction. For complex queries I use QueryBuilder with parameterized values. I define appropriate relationships and indexes based on access patterns. Schema changes are managed through migrations rather than production synchronization. For operations involving multiple dependent writes, I use TypeORM transactions and ensure all operations use the transaction manager."
