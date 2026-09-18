@@ -1,0 +1,339 @@
+Database Integration with Node.js
+
+1. How Node.js Connects to a Database
+    Typical architecture:
+        Client
+        ↓
+        Controller
+        ↓
+        Service
+        ↓
+        Repository / Model
+        ↓
+        Database Driver / ORM
+        ↓
+        Database
+
+    Examples:
+    MongoDB
+        Node.js → MongoDB Driver / Mongoose → MongoDB
+    PostgreSQL
+        Node.js → pg / TypeORM / Prisma → PostgreSQL
+
+
+2. Database Driver vs ORM
+    Driver
+        Directly communicates with the database.
+
+    Examples:
+        PostgreSQL → pg
+        MongoDB → mongodb
+
+    You write queries more directly.
+        ORM
+
+    Object Relational Mapper
+        Examples:
+            TypeORM
+            Prisma
+            Sequelize
+
+    Instead of manually writing every SQL query, you work with entities/models and ORM APIs.
+    Example TypeORM:
+        const users = await userRepository.find({
+            where: {
+                isActive: true
+            }
+        });
+
+
+3. Connection Pooling ⭐
+    Instead of creating a new DB connection for every request:
+        Request 1 → new connection
+        Request 2 → new connection
+        Request 3 → new connection
+
+    we maintain a connection pool:
+                     ┌─ Connection 1
+        Node.js ─────┼─ Connection 2
+                     ├─ Connection 3
+                     └─ Connection 4
+
+    Requests borrow an available connection and return it after the query completes.
+    Why?
+        Better performance
+        Avoid connection creation overhead
+        Limits total DB connections
+        Handles concurrent requests efficiently
+
+
+4. Connection Pool Example
+    Conceptually:
+        const pool = new Pool({
+            host: process.env.DB_HOST,
+            port: 5432,
+            user: process.env.DB_USER,
+            password: process.env.DB_PASSWORD,
+            database: process.env.DB_NAME,
+            max: 10
+        });
+
+    max: 10 means the pool can maintain up to 10 connections, depending on the driver's configuration/behavior.
+
+
+5. Why Not Create a Connection Per Request?
+    Bad approach:
+        Request
+        ↓
+        Create DB connection
+        ↓
+        Query
+        ↓
+        Close connection
+
+    For thousands of requests:
+        1000 requests
+        ↓
+        1000 connection attempts
+    This can exhaust database connection limits and create unnecessary overhead.
+
+    Better:
+        Application
+        ↓
+        Connection Pool
+        ↓
+        Reuse connections
+
+
+6. ORM Example — TypeORM
+    @Entity()
+    class User {
+        @PrimaryGeneratedColumn()
+        id: number;
+
+        @Column()
+        email: string;
+    }
+
+    Repository:
+        const userRepository = dataSource.getRepository(User);
+
+    Query:
+        const user = await userRepository.findOne({
+            where: {
+                email
+            }
+        });
+
+    Create:
+        const user = userRepository.create({
+            email,
+            name
+        });
+
+    await userRepository.save(user);
+
+
+7. Repository Pattern
+    A repository handles database operations.
+        Controller
+            ↓
+        Service
+            ↓
+        Repository
+            ↓
+        Database
+
+    Example:
+        class UserService {
+        constructor(
+            private readonly userRepository: UserRepository
+        ) {}
+
+        async getUser(id: number) {
+            return this.userRepository.findById(id);
+        }
+        }
+
+    The service shouldn't need to know the details of the SQL query.
+
+
+8. Transactions ⭐⭐⭐
+    A transaction groups multiple DB operations into one logical unit.
+    Example:
+        Create Order
+        +
+        Reduce Product Stock
+        +
+        Create Payment Record
+
+    Either:
+        ALL succeed ✅
+    or:
+        ALL rollback ❌
+
+    Example:
+        BEGIN
+        ↓
+        Create order
+        ↓
+        Update stock
+        ↓
+        Create payment
+        ↓
+        COMMIT
+
+    If stock update fails:
+        ROLLBACK
+
+    The previous changes are undone.
+
+
+9. ACID
+    | Property    | Meaning                                            |
+    | ----------- | -------------------------------------------------- |
+    | Atomicity   | All or nothing                                     |
+    | Consistency | Valid state before/after transaction               |
+    | Isolation   | Concurrent transactions don't improperly interfere |
+    | Durability  | Committed data persists                            |
+
+
+10. N+1 Query Problem ⭐
+    Suppose:
+        Get 100 users
+
+    You execute:
+        1 query → get users
+        100 queries → get each user's orders
+
+    Total:
+        101 queries
+
+    That's the N+1 query problem.
+
+    Instead, use:
+        JOINs
+        eager/explicit relations where appropriate
+        batching
+        DataLoader-style batching for GraphQL
+        carefully designed queries
+
+    Goal:
+        1–few optimized queries
+
+    rather than hundreds of repetitive queries.
+
+
+11. Query Optimization
+    If an API is slow:
+        API slow
+        ↓
+        Measure DB query duration
+        ↓
+        Inspect generated SQL
+        ↓
+        EXPLAIN / EXPLAIN ANALYZE
+        ↓
+        Check indexes
+        ↓
+        Check query plan
+        ↓
+        Reduce unnecessary data
+        ↓
+        Optimize query
+
+    Don't immediately add caching without finding the bottleneck.
+
+
+12. Indexes 
+    Suppose:
+        SELECT *
+        FROM users
+        WHERE email = $1;
+
+    If email is frequently searched, an appropriate index can significantly improve lookup performance.
+        CREATE INDEX idx_users_email
+        ON users(email);
+
+    But indexes aren't free.
+
+    They:
+        consume storage
+        add write/update overhead
+        need appropriate design
+
+    So don't index every column blindly.
+
+
+13. Pagination
+    Never return millions of records:
+        const users = await repository.find();
+
+    Use pagination.
+
+    Offset:
+        ?page=2&limit=20
+
+    Conceptually:
+        LIMIT 20 OFFSET 20
+
+    For very large/changing datasets, cursor/keyset pagination can perform better and provide more stable traversal.
+
+
+14. Handling Database Errors
+    Example:
+        try {
+            return await repository.save(user);
+        } catch (error) {
+            // log internal error
+            // map known DB error
+            throw error;
+        }
+
+    Common cases:
+        Duplicate unique value → 409 Conflict
+        Invalid input → 400/422
+        Record not found → 404
+        Connection/database unavailable → 503 or appropriate upstream error
+        Unexpected DB failure → 500
+
+    Don't expose raw database errors to the client.
+
+
+15. Production Scenario ⭐
+Interviewer:
+    "Your Node.js API suddenly starts throwing database connection errors. What will you check?"
+
+Answer:
+    "First I'd check database availability and connectivity, then verify credentials and environment configuration. I'd inspect connection-pool exhaustion, active connections, database connection limits, application logs and database logs. I'd also check whether a recent deployment introduced connection leaks or long-running queries. After identifying the cause, I'd fix the pool/query behavior and add monitoring and appropriate retry or failover handling where applicable."
+
+
+16. Another Common Scenario
+    "Your API is making too many database queries. What would you do?"
+    Answer:
+        "I'd inspect the query logs and identify repeated or N+1 queries. Then I'd optimize the query using joins or batching, add appropriate indexes, select only required fields, and verify the query plan. I'd also check whether caching is appropriate for frequently accessed data."
+
+
+⭐ Most Important Interview Questions
+    Q1. What is connection pooling?
+        A pool maintains reusable database connections so requests don't have to create a new connection for every query.
+
+    Q2. Why use an ORM?
+        It provides an abstraction over database operations, improves developer productivity, supports entity/model mapping and can provide features such as migrations and transactions. Raw SQL may still be preferable for complex or performance-critical queries.
+
+    Q3. What is a transaction?
+        A transaction groups multiple database operations so they can be committed atomically or rolled back if a failure occurs.
+
+    Q4. What is N+1?
+        Fetching a collection with one query and then executing an additional query for each item, resulting in unnecessarily many database queries.
+
+    Q5. What is an index?
+        A database structure that helps locate rows efficiently for supported query patterns, at the cost of additional storage and write overhead.
+
+    Q6. How do you improve slow DB queries?
+        Check query execution time and query plan, inspect indexes, optimize joins/filters, select only needed columns, avoid N+1 queries, and consider pagination or caching where appropriate.
+
+
+⭐ Interview-ready answer
+    "How do you integrate PostgreSQL with Node.js?"
+        "I can use the PostgreSQL driver directly or an ORM such as TypeORM. In a production application, I configure a connection pool and keep database access behind repositories or a data-access layer. Services contain business logic and use repositories for queries. For operations requiring multiple related changes, I use database transactions. I also pay attention to indexes, query plans, pagination, avoiding N+1 queries, connection-pool limits, and proper database error handling."
