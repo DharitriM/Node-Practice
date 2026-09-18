@@ -1,0 +1,369 @@
+MongoDB + Mongoose
+
+1. MongoDB Basics
+    MongoDB is a NoSQL document database.
+
+    Instead of tables and rows:
+        SQL
+            Database
+            └── Table
+                └── Row
+
+    MongoDB uses:
+        Database
+        └── Collection
+            └── Document
+
+    Example document:
+        {
+        "_id": "65abc123",
+        "name": "John",
+        "email": "john@test.com",
+        "role": "ADMIN"
+        }
+
+    Documents are stored in BSON (Binary JSON-like format).
+
+
+2. MongoDB vs SQL
+    SQL	MongoDB
+    Database	Database
+    Table	Collection
+    Row	Document
+    Column	Field
+    JOIN	$lookup / application-side patterns
+    Primary Key	_id
+    Schema	Flexible by default
+
+    Important:
+        MongoDB is schema-flexible, but production applications can still enforce schemas at the application level using Mongoose or other validation mechanisms.
+
+
+3. Mongoose
+    Mongoose is an ODM — Object Data Modeling library for MongoDB and Node.js.
+
+    It provides:
+        Schema definition
+        Models
+        Validation
+        Middleware/hooks
+        Query APIs
+        Population
+        Type casting
+
+    Install:
+        npm install mongoose
+
+        Connect:
+            import mongoose from "mongoose";
+
+        await mongoose.connect(process.env.MONGO_URI);
+
+
+4. Schema
+    Define document structure:
+    const userSchema = new mongoose.Schema({
+        name: {
+            type: String,
+            required: true
+        },
+
+        email: {
+            type: String,
+            required: true,
+            unique: true
+        },
+
+        age: {
+            type: Number
+        }
+    });
+
+
+5. Model
+    Create a model from the schema:
+        const User = mongoose.model("User", userSchema);
+
+    Then:
+        const user = await User.create({
+        name: "John",
+        email: "john@test.com",
+        age: 25
+        });
+
+
+6. CRUD
+    Create
+        await User.create({
+            name: "John",
+            email: "john@test.com"
+        });
+    Read
+        const users = await User.find();
+        Specific user:
+            const user = await User.findById(id);
+    Update
+        await User.findByIdAndUpdate(
+            id,
+            { name: "David" },
+            { new: true }
+        );
+    Delete
+        await User.findByIdAndDelete(id);
+
+
+7. find() vs findOne() vs findById()
+    find()
+        Returns an array:
+            const users = await User.find();
+    findOne()
+        Returns one matching document:
+            const user = await User.findOne({
+                email
+            });
+    findById()
+        Searches by _id:
+        const user = await User.findById(id);
+
+
+8. ObjectId ⭐
+    MongoDB commonly uses ObjectId for _id.
+    Example:
+        ObjectId("65f123...")
+
+    It is not simply a normal string internally.
+    When accepting IDs from API requests, validate them before querying:
+        if (!mongoose.isValidObjectId(id)) {
+        return res.status(400).json({
+            message: "Invalid ID"
+        });
+        }
+
+
+9. populate() ⭐⭐⭐
+    MongoDB doesn't work like a traditional SQL foreign-key JOIN, but Mongoose provides populate() for referenced documents.
+    Example:
+        const orderSchema = new mongoose.Schema({
+        total: Number,
+
+        user: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User"
+        }
+        });
+
+    Then:
+        const order = await Order
+        .findById(orderId)
+        .populate("user");
+
+    Result conceptually:
+
+        Order
+        ├── total
+        └── user
+            ├── name
+            └── email
+    Interview answer
+        "populate() resolves referenced MongoDB documents and replaces the reference with the corresponding document data. It is convenient, but I avoid unnecessary population because it can increase database work and response size."
+
+
+10. lean() ⭐
+    Normally:
+        const users = await User.find();
+
+    Mongoose returns Mongoose documents with additional methods and behavior.
+    For read-only operations:
+        const users = await User.find().lean();
+
+    lean() returns plain JavaScript objects.
+    This can reduce Mongoose document overhead for suitable read-heavy queries.
+
+    Interview answer
+    "lean() is useful for read-only queries when I don't need Mongoose document methods or change tracking."
+
+
+11. Indexes ⭐⭐⭐
+    Suppose you frequently search:
+        User.findOne({ email });
+
+    Create an index:
+        userSchema.index({ email: 1 });
+
+    For multiple fields:
+        userSchema.index({
+            restaurantId: 1,
+            createdAt: -1
+        });
+
+    Indexes can improve reads but increase storage and write/update overhead.
+
+
+12. Aggregation
+MongoDB aggregation processes documents through stages.
+Example:
+    const result = await Order.aggregate([
+    {
+        $match: {
+        status: "COMPLETED"
+        }
+    },
+    {
+        $group: {
+        _id: "$userId",
+        total: {
+            $sum: "$amount"
+        }
+        }
+    }
+    ]);
+
+Flow:
+    Documents
+    ↓
+    $match
+    ↓
+    $group
+    ↓
+    Result
+
+Common stages:
+    $match
+    $group
+    $project
+    $sort
+    $limit
+    $lookup
+    $unwind
+
+
+13. $lookup
+    Used for joining data between collections.
+    Conceptually similar to SQL JOIN.
+        {
+        $lookup: {
+            from: "users",
+            localField: "userId",
+            foreignField: "_id",
+            as: "user"
+        }
+        }
+
+    But don't automatically replace every relationship with $lookup; data modeling and query patterns matter.
+
+
+14. Embedding vs Referencing ⭐⭐⭐
+    Embedding
+        {
+            "name": "John",
+            "address": {
+                "city": "Bangalore",
+                "country": "India"
+            }
+        }
+
+    Good when related data:
+        is small
+        is frequently accessed together
+        has similar lifecycle
+        Referencing
+        {
+            "name": "John",
+            "addressId": "65abc..."
+        }
+
+    Useful when:
+        related data is large
+        shared by many documents
+        independently updated
+        relationships are complex
+
+    Interview answer
+        "I choose embedding or referencing based on access patterns, data size, update frequency and relationship cardinality rather than treating one as universally better."
+
+
+15. MongoDB Transactions
+    MongoDB supports transactions, including multi-document transactions on deployments that support them.
+    Conceptually:
+        START TRANSACTION
+            ↓
+        Create Order
+            ↓
+        Update Stock
+            ↓
+        Create Payment
+            ↓
+        COMMIT
+
+    If something fails:
+        ROLLBACK
+
+    Use transactions when multiple operations need atomic consistency.
+
+
+16. MongoDB Scenario
+Interviewer:
+    "Your MongoDB API is slow. How would you troubleshoot it?"
+
+Answer:
+    "First I'd identify the slow query using application and database monitoring. Then I'd inspect the query plan with explain(), check whether appropriate indexes exist, verify the query's filtering and sorting pattern, reduce unnecessary fields, avoid excessive population, and use lean() for suitable read-only queries. I'd also check document size, aggregation stages and database resource usage."
+
+
+17. Mongoose Middleware
+    Mongoose supports middleware/hooks.
+    Example:
+        userSchema.pre("save", async function () {
+        // perform logic before save
+        });
+
+    A common use case is password hashing.
+    But be careful:
+        User.findOneAndUpdate(...)
+
+    doesn't behave exactly like save() middleware. Different Mongoose operations have different middleware hooks.
+
+
+18. unique: true — Important Trap
+    Many developers say:
+        "unique: true validates uniqueness."
+
+    Not exactly.
+        email: {
+        type: String,
+        unique: true
+        }
+
+    unique is primarily an instruction for a unique index, not a normal Mongoose validator.
+
+    You should still handle duplicate-key database errors properly.
+
+
+⭐ Most Asked Questions
+    Q1. MongoDB vs SQL?
+        MongoDB is a document-oriented NoSQL database, while SQL databases use relational tables and structured schemas.
+
+    Q2. What is Mongoose?
+        An ODM that provides schemas, models, validation, middleware and query abstractions for MongoDB.
+
+    Q3. What is populate()?
+        Mongoose's mechanism for resolving referenced documents.
+
+    Q4. What is lean()?
+        It returns plain JavaScript objects instead of full Mongoose documents, which can reduce overhead for suitable read-only queries.
+
+    Q5. What is aggregation?
+        A pipeline-based mechanism for filtering, transforming and calculating data across MongoDB documents.
+
+    Q6. Embedding vs referencing?
+        Choose based on data size, access patterns, relationship cardinality, update frequency and lifecycle.
+
+    Q7. How do you optimize MongoDB?
+        Proper indexes, query-plan analysis, projection, efficient schema design, pagination, avoiding unnecessary population, optimized aggregation and appropriate caching.
+
+    Q8. What is ObjectId?
+        MongoDB's commonly used identifier type for documents.
+
+
+⭐ Interview-ready answer
+"How have you used MongoDB with Node.js?"
+    "I use Mongoose as the ODM layer. I define schemas and models, perform CRUD operations through the models, validate ObjectIds and input data, and use indexes for frequently queried fields. For relationships, I choose between embedding, references and population based on access patterns. For complex reporting or analytics, I use aggregation pipelines. For read-heavy endpoints where I don't need Mongoose document methods, I can use lean(). For operations that require multiple changes to remain consistent, I use MongoDB transactions where supported."
