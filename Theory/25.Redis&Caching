@@ -1,0 +1,394 @@
+Redis & Caching
+
+1. What is Redis?
+    Redis is an in-memory data store commonly used for:
+        Caching
+        Sessions
+        Rate limiting
+        Counters
+        Queues
+        Pub/Sub
+        Distributed coordination/locks
+
+    Because data is primarily kept in memory, Redis can provide very low-latency access.
+
+
+2. Why Do We Need Caching? ⭐⭐⭐
+    Suppose:
+        GET /restaurants/123/menu
+
+    Every request queries PostgreSQL:
+        1000 requests
+            ↓
+        1000 DB queries
+
+    This increases:
+        Database load
+        Response latency
+        Infrastructure cost
+
+    With Redis:
+        Request
+        ↓
+        Redis
+        ↓
+        Cache HIT → return data
+
+    Only cache misses need to reach the database.
+
+
+3. Cache-Aside Pattern ⭐⭐⭐
+    Request
+    ↓
+    Check Redis
+    ↓
+    ┌───────────────┐
+    │               │
+    HIT             MISS
+    ↓               ↓
+    Return        Query DB
+    data             ↓
+                Store Redis
+                    ↓
+                Return data
+
+    Example:
+        const key = `restaurant:${restaurantId}`;
+
+        const cached = await redis.get(key);
+
+        if (cached) {
+        return JSON.parse(cached);
+        }
+
+        const restaurant =
+        await restaurantRepository.findById(restaurantId);
+
+        await redis.set(
+        key,
+        JSON.stringify(restaurant),
+        { EX: 300 }
+        );
+
+        return restaurant;
+
+    EX: 300 means the cached value expires after 300 seconds.
+
+
+4. Cache Hit vs Cache Miss
+    Cache hit
+        Data exists:
+            Redis → Data found → return
+    Cache miss
+        Data doesn't exist:
+            Redis → Not found
+                ↓
+            Database
+                ↓
+            Redis
+                ↓
+            Response
+
+    Interviewers may ask:
+        "How do you measure whether caching is helping?"
+
+    Mention:
+        Cache hit rate
+        Cache miss rate
+        Latency
+        DB query reduction
+        Redis memory usage
+
+
+5. TTL ⭐⭐⭐
+    TTL = Time To Live
+
+    Example:
+        restaurant:123
+        TTL = 5 minutes
+
+    After five minutes, Redis automatically expires the key.
+
+    Useful for:
+        Session data
+        OTP-related temporary state
+        Frequently changing API responses
+        Temporary calculations
+        Rate-limit counters
+
+    Don't cache data forever unless there is a deliberate invalidation strategy.
+
+
+6. Cache Invalidation ⭐⭐⭐
+    One of the most famous caching problems:
+        "How do you invalidate the cache?"
+
+    Suppose:
+        DB:
+        Restaurant name = ABC
+
+        Redis:
+        Restaurant name = ABC
+
+    Update DB:
+        Restaurant name = XYZ
+
+    Redis still contains:
+        ABC ❌
+
+    So after update:
+        await repository.update(id, data);
+        await redis.del(`restaurant:${id}`);
+
+    Next GET:
+        Redis MISS
+        ↓
+        DB → XYZ
+        ↓
+        Redis updated
+
+
+7. Cache-Aside with Update
+    Typical pattern:
+        WRITE
+        ↓
+        Update DB
+        ↓
+        Delete/Invalidate cache
+
+    Then:
+        READ
+        ↓
+        Redis
+        ↓
+        MISS
+        ↓
+        DB
+        ↓
+        Populate cache
+
+    This is often easier to reason about than trying to update both stores perfectly on every write.
+
+
+8. Redis Data Structures ⭐⭐⭐
+    Know these:
+        Type	Example use
+        String	Cache, counter
+        Hash	User/session attributes
+        List	Queue-like workloads
+        Set	Unique values
+        Sorted Set	Leaderboards/ranking
+        Streams	Event/message streams
+
+    Example:
+        String:
+        user:101 → JSON
+
+        Hash:
+        user:101 → {name, role, email}
+
+        Set:
+        online-users → {101, 102, 103}
+
+        Sorted Set:
+        leaderboard → user + score
+
+
+9. Redis for Rate Limiting
+    Example:
+        IP = 10.20.30.40
+
+    Redis counter:
+        rate:10.20.30.40 → 17
+
+    Set expiration:
+        TTL = 60 seconds
+
+    Then:
+        17 requests → allowed
+        101st request → rejected
+
+    Redis is useful here because multiple Node.js instances can share the same rate-limit state.
+
+
+10. Redis for Sessions
+    With multiple Node instances:
+        Client
+        ↓
+        Load Balancer
+        ├── Node 1
+        ├── Node 2
+        └── Node 3
+
+    If session data is stored only in Node 1's memory:
+        Request 1 → Node 1 → session exists
+        Request 2 → Node 2 → session missing ❌
+
+    Use shared Redis:
+        Node 1 ─┐
+        Node 2 ─┼→ Redis → Session
+        Node 3 ─┘
+
+    Now all instances can access the same session state.
+
+
+11. Cache Stampede ⭐⭐⭐
+    Suppose a popular cache expires:
+        restaurant:123
+
+    At exactly that moment:
+        500 requests
+            ↓
+        All see cache MISS
+            ↓
+        500 DB queries ❌
+
+    This is a cache stampede / thundering herd problem.
+    Possible solutions:
+        Distributed locking
+        Request coalescing/single-flight
+        Background refresh
+        TTL jitter
+        Stale-while-revalidate strategies
+
+
+12. Distributed Lock
+    Suppose only one worker should process a particular resource at a time.
+    Conceptually:
+        Worker A → acquire lock ✅
+        Worker B → acquire lock ❌
+
+    Redis can be used for distributed coordination with appropriate locking algorithms and carefully managed expiration/ownership.
+    Don't implement a naive SET + DEL lock without understanding ownership and failure cases.
+
+
+13. What Should You Cache?
+    Good candidates:
+        Frequently read
+        Rarely changed
+        Expensive to calculate
+        Shared across users
+
+    Examples:
+        Restaurant menu
+        Product catalog
+        Configuration
+        Dashboard statistics
+        Public API responses
+
+    Avoid blindly caching:
+        Highly sensitive data
+        Rapidly changing data
+        Data requiring strict real-time consistency
+
+    The exact decision depends on consistency requirements.
+
+
+14. Cache Key Design ⭐⭐
+Bad:
+    restaurant
+
+Better:
+    restaurant:123
+
+For filtered APIs:
+    menu:restaurant:123:category:5:page:1
+
+Keys should be:
+    Predictable
+    Unique
+    Versionable when needed
+    Easy to invalidate
+
+
+15. Redis vs PostgreSQL
+    They solve different problems.
+        PostgreSQL
+            → Durable primary database
+            → Complex queries
+            → Relationships
+            → Transactions
+
+        Redis
+            → Fast in-memory data
+            → Cache
+            → Counters
+            → Temporary/shared state
+
+    Redis should not automatically replace your primary database.
+
+
+16. Important Failure Question ⭐⭐⭐
+    Interviewer:
+        "What happens if Redis goes down?"
+
+    A strong answer:
+        "It depends on whether Redis is a cache or a critical state store. If it's only a cache, the application should ideally fall back to the primary database, with appropriate timeouts and protection against a resulting DB overload. If Redis stores critical session or coordination state, the failure strategy needs to be designed explicitly, including high availability and recovery."
+
+    Important:
+        Don't make Redis a single point of failure accidentally.
+
+
+17. Cache Consistency
+    Suppose:
+        DB = new value
+        Redis = old value
+    You have stale cache data.
+
+    Common strategies:
+        TTL-based:  Let cache expire naturally.
+        Explicit invalidation:  Delete cache after successful DB update.
+        Write-through:  Write cache and DB through a coordinated strategy.
+        Write-behind:  Cache receives writes and persistence happens later.
+
+    For most typical REST APIs, cache-aside + TTL + explicit invalidation is a practical starting point.
+
+
+⭐ Most Asked Interview Questions
+    Q1. Why Redis?
+        "Redis provides very low-latency in-memory access and is commonly used for caching, sessions, counters, rate limiting and distributed coordination."
+
+    Q2. What is cache-aside?
+        "The application first checks the cache. On a miss it reads from the database, stores the result in the cache, and returns it."
+
+    Q3. What is TTL?
+        "Time To Live defines how long a cached key should remain valid before expiration."
+
+    Q4. How do you handle stale cache?
+        "Use appropriate TTLs and invalidate or update affected keys after writes."
+
+    Q5. What is cache stampede?
+        "When many requests simultaneously miss an expired cache entry and all hit the database."
+
+    Q6. Why Redis for distributed rate limiting?
+        "Because multiple application instances can share the same centralized counters and expiration state."
+
+    Q7. Redis vs database?
+        "Redis is primarily optimized for low-latency in-memory operations and temporary/shared state, while a relational database is typically the durable source of truth."
+
+
+⭐ Strong Scenario Answer
+    Interviewer:
+        "Your /menu API receives 10,000 requests per minute and PostgreSQL is becoming overloaded. What would you do?"
+
+    Answer:
+        "First I'd measure the database and API bottleneck. If the menu data is read-heavy and doesn't change frequently, I'd introduce Redis using a cache-aside strategy. I'd use a well-designed cache key with a suitable TTL, return cache hits directly, and query PostgreSQL only on misses. When menu data changes, I'd invalidate the affected cache key. I'd also monitor cache hit rate, Redis latency and database load. If many requests miss simultaneously, I'd consider protection against cache stampede."
+
+
+🔥 One Concept You Must Remember
+    CACHE-ASIDE
+        READ:
+            Redis → HIT → Return
+
+            Redis → MISS
+                ↓
+                DB
+                ↓
+                Redis
+                ↓
+                Return
+
+        WRITE:
+            DB update
+            ↓
+            Invalidate Redis
